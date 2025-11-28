@@ -29,6 +29,18 @@ def download_and_index():
         if not index_id or index_id == 'your_index_id_here':
             return jsonify({"error": "TWELVELABS_INDEX_ID not configured in .env file"}), 500
         
+        service = get_twelvelabs_service()
+        
+        existing_video_id = service.find_video_by_url(index_id, youtube_url)
+        if existing_video_id:
+            print(f"Video already indexed with ID: {existing_video_id}")
+            return jsonify({
+                "status": "success",
+                "video_id": existing_video_id,
+                "message": "Video already indexed. Using existing video_id.",
+                "already_indexed": True
+            }), 200
+        
         temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp_videos')
         os.makedirs(temp_dir, exist_ok=True)
         

@@ -69,6 +69,33 @@ class TwelveLabsService:
             print(f"Error fetching videos for index {index_id}: {e}")
             return []
     
+    def find_video_by_url(self, index_id, youtube_url):
+        try:
+            import re
+            video_id_match = re.search(r'(?:v=|/)([0-9A-Za-z_-]{11}).*', youtube_url)
+            if not video_id_match:
+                return None
+            
+            yt_video_id = video_id_match.group(1)
+            
+            page = 1
+            while page <= 10:
+                videos = self.get_videos(index_id, page)
+                if not videos:
+                    break
+                
+                for video in videos:
+                    video_name = video.get('name', '')
+                    if yt_video_id in video_name or youtube_url in video_name:
+                        return video.get('id')
+                
+                page += 1
+            
+            return None
+        except Exception as e:
+            print(f"Error searching for video: {e}")
+            return None
+    
     def analyze_video(self, video_id, prompt):
         try:
             analysis_response = self.client.analyze(
