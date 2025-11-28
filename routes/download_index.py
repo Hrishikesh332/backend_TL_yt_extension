@@ -44,8 +44,12 @@ def download_and_index():
         temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp_videos')
         os.makedirs(temp_dir, exist_ok=True)
         
-        video_id = str(uuid.uuid4())
-        video_path = os.path.join(temp_dir, f"{video_id}.mp4")
+        import re
+        video_id_match = re.search(r'(?:v=|/)([0-9A-Za-z_-]{11}).*', youtube_url)
+        yt_video_id = video_id_match.group(1) if video_id_match else str(uuid.uuid4())
+        
+        unique_id = uuid.uuid4().hex[:8]
+        video_path = os.path.join(temp_dir, f"yt_{yt_video_id}_{unique_id}.mp4")
         
         print(f"Downloading video from: {youtube_url}")
         downloaded_path = download_youtube_video(youtube_url, video_path)

@@ -77,6 +77,7 @@ class TwelveLabsService:
                 return None
             
             yt_video_id = video_id_match.group(1)
+            print(f"Searching for YouTube video ID: {yt_video_id} in index...")
             
             page = 1
             while page <= 10:
@@ -86,11 +87,14 @@ class TwelveLabsService:
                 
                 for video in videos:
                     video_name = video.get('name', '')
-                    if yt_video_id in video_name or youtube_url in video_name:
+                    print(f"Checking video: {video_name}")
+                    if f"yt_{yt_video_id}" in video_name:
+                        print(f"Found existing video! ID: {video.get('id')}")
                         return video.get('id')
                 
                 page += 1
             
+            print(f"No existing video found for YouTube ID: {yt_video_id}")
             return None
         except Exception as e:
             print(f"Error searching for video: {e}")
