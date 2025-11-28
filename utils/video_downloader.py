@@ -19,10 +19,12 @@ def download_youtube_video(url, output_path):
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
-                'player_skip': ['webpage', 'configs'],
+                'player_client': ['ios', 'android', 'web'],
+                'player_skip': ['webpage'],
             }
         },
+        'age_limit': None,
+        'source_address': '0.0.0.0',
         'geo_bypass': True,
         'nocheckcertificate': True,
     }
