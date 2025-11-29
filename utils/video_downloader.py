@@ -19,10 +19,12 @@ def download_youtube_video(url, output_path):
         for attempt in range(max_retries):
             try:
                 ydl_opts = {
-                    'format': 'bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best',
+                    # Use formats that don't require PO tokens (18=360p, 22=720p, 135+140=480p)
+                    'format': '18/22/135+140/134+140/best[ext=mp4]/best',
                     'outtmpl': output_path,
                     'quiet': False,
-                    'no_warnings': False,
+                    'no_warnings': True,  # Suppress PO token warnings
+                    'ignoreerrors': False,  # Still show actual errors
                     'noplaylist': True,
                     'merge_output_format': 'mp4',
                     'http_headers': {

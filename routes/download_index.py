@@ -68,6 +68,8 @@ def download_and_index():
         )
         
         if 'error' in result:
+            print(f"ERROR: TwelveLabs upload failed: {result.get('error')}")
+            print(f"Full result: {result}")
             try:
                 if os.path.exists(downloaded_path):
                     os.remove(downloaded_path)
