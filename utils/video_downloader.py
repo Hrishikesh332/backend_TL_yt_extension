@@ -4,6 +4,14 @@ import time
 
 
 def download_youtube_video(url, output_path):
+    # Get proxy URL from environment variable
+    proxy_url = os.environ.get('PROXY_URL')
+    
+    if proxy_url:
+        print(f"Using proxy for YouTube download: {proxy_url[:30]}...")
+    else:
+        print("No proxy configured. Downloading directly.")
+    
     # Try different client strategies for bot detection bypass
     client_strategies = [
         ['mweb', 'ios'],  # Mobile web + iOS (most reliable)
@@ -48,6 +56,10 @@ def download_youtube_video(url, output_path):
                     'nocheckcertificate': True,
                     'socket_timeout': 30,
                 }
+                
+                # Add proxy if configured
+                if proxy_url:
+                    ydl_opts['proxy'] = proxy_url
                 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
