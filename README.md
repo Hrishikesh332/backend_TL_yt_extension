@@ -1,8 +1,6 @@
 # YouTube Extension - Flask API
 
 
-Flask API for downloading YouTube videos, indexing them with TwelveLabs, and performing AI-powered video analysis.
-
 ## Base URL
 ```
 http://localhost:5000
@@ -10,9 +8,171 @@ http://localhost:5000
 
 ## Endpoints
 
-### 1. Health Check
+### 1. Agentic Chat (NEW - Recommended)
 
-**Endpoint:** `GET /health`
+**Endpoint:** `POST /api/agentic-chat`
+
+**Description:** Agentic API that understands user intent and automatically routes to find videos, index them, or analyze existing videos. Uses LangGraph for state management and OpenAI for query understanding.
+
+**Required Environment Variables:**
+- `OPENAI_API_KEY` - Your OpenAI API key (required)
+- `BROWSERBASE_API_KEY` - Your Browserbase API key (for finding videos)
+- `BROWSERBASE_PROJECT_ID` - Your Browserbase project ID
+- `TWELVELABS_INDEX_ID` - Your TwelveLabs index ID (for indexing/analysis)
+
+**Request Body:**
+```json
+{
+  "query": "find videos about machine learning and index them",
+  "conversation_context": {
+    "auto_index": true,
+    "video_id": "optional_video_id"
+  }
+}
+```
+
+**Request Parameters:**
+- `query` (required) - Natural language query describing what you want
+- `conversation_context` (optional) - Context from previous conversations
+  - `auto_index` (optional, default: true) - Automatically index found videos
+  - `video_id` (optional) - Video ID for analysis requests
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "response": "I found 5 videos about machine learning. I'll index them for you...",
+  "intent": "find_videos",
+  "found_videos": [
+    {
+      "title": "Machine Learning Tutorial",
+      "url": "https://www.youtube.com/watch?v=...",
+      "channelName": "Tech Channel",
+      "duration": "10:30"
+    }
+  ],
+  "indexed_videos": [...],
+  "video_id": "...",
+  "analysis_result": "..."
+}
+```
+
+**Streaming Endpoint:** `POST /api/agentic-chat/stream`
+
+Returns streaming responses as the agent processes your request.
+
+**Notes**
+- Uses LangGraph for intelligent workflow orchestration
+- Automatically understands intent (find, analyze, index)
+- After finding videos, asks if you want to index them (unless auto_index is false)
+- Can handle conversational follow ups
+- Combines Browserbase for video discovery and TwelveLabs for indexing/analysis
+
+---
+
+### 2. Find Videos
+
+**Endpoint:** `POST /api/find-videos`
+
+**Description:** Discovers YouTube videos using Browserbase automation. Searches YouTube and extracts video information.
+
+**Required Environment Variables:**
+- `BROWSERBASE_API_KEY` - Your Browserbase API key
+- `BROWSERBASE_PROJECT_ID` - Your Browserbase project ID
+- `OPENAI_API_KEY` - Your OpenAI API key (required for agentic automation)
+
+**Request Body:**
+```json
+{
+  "search_query": "AI technology demo",
+  "max_videos": 3
+}
+```
+
+**Request Parameters:**
+- `search_query` (required) - YouTube search query
+- `max_videos` (optional, default: 3, max: 20) - Maximum number of videos to return
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "videos": [
+    {
+      "title": "Video Title",
+      "url": "https://www.youtube.com/watch?v=...",
+      "channelName": "Channel Name",
+      "duration": "10:30"
+    }
+  ],
+  "count": 1
+}
+```
+
+```
+
+---
+
+### 2. Index Videos (NEW)
+
+**Endpoint:** `POST /api/index-videos`
+
+**Description:** Indexes one or more YouTube videos using TwelveLabs. Downloads videos and uploads them to TwelveLabs for indexing.
+
+**Request Body (Multiple Videos):**
+```json
+{
+  "video_urls": [
+    "https://www.youtube.com/watch?v=VIDEO_ID_1",
+    "https://www.youtube.com/watch?v=VIDEO_ID_2"
+  ],
+  "index_id": "optional_index_id"
+}
+```
+
+**Request Body (Single Video):**
+```json
+{
+  "video_url": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "index_id": "optional_index_id"
+}
+```
+
+**Request Parameters:**
+- `video_url` or `video_urls` (required) - YouTube video URL(s) to index
+- `index_id` (optional) - TwelveLabs index ID (uses `TWELVELABS_INDEX_ID` from env if not provided)
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "indexed_videos": [
+    {
+      "video_url": "https://www.youtube.com/watch?v=...",
+      "video_id": "twelvelabs_video_id",
+      "status": "indexed"
+    }
+  ],
+  "failed_videos": [],
+  "summary": {
+    "total": 1,
+    "indexed": 1,
+    "failed": 0
+  }
+}
+```
+
+
+**Notes**
+- Checks if videos are already indexed before downloading
+- Downloads videos temporarily, indexes them, then cleans up
+- Returns status for each video (indexed, already_indexed, or failed)
+
+---
+
+### 3. Health Check
+
+**Endpoint:** `GET /api/health`
 
 **Description:** Check if the API server is running.
 
@@ -25,9 +185,9 @@ http://localhost:5000
 
 ---
 
-### 2. Download and Index Video
+### 4. Download and Index Video
 
-**Endpoint:** `POST /download-and-index`
+**Endpoint:** `POST /api/download-and-index`
 
 **Description:** Downloads a YouTube video and indexes it with TwelveLabs for analysis.
 
@@ -47,23 +207,17 @@ http://localhost:5000
 }
 ```
 
-**Error Response:**
-```json
-{
-  "error": "Error message describing what went wrong"
-}
-```
 
-**Notes:**
+**Notes**
 - Video is kept until indexing completes and video_id is confirmed
 - Indexing may take time depending on video length
 - Use the returned `video_id` for analysis requests
 
 ---
 
-### 3. Analyze Video
+### 5. Analyze Video
 
-**Endpoint:** `POST /analyze`
+**Endpoint:** `POST /api/analyze`
 
 **Description:** Performs AI-powered analysis on an indexed video using TwelveLabs. **Always returns streaming responses** for real-time feedback.
 
@@ -76,7 +230,7 @@ http://localhost:5000
 }
 ```
 
-**Request Body (Pre-defined Analysis Types):**
+**Request Body**
 ```json
 {
   "video_id": "6928fxxxxxxx",
@@ -84,12 +238,12 @@ http://localhost:5000
 }
 ```
 
-**Request Parameters:**
+**Request Parameters**
 - `video_id` (required) - ID of the indexed video
 - `prompt` (required for open-ended) - Custom analysis question
 - `analysis_type` (optional, default: "open-ended") - Type of analysis
 
-**Analysis Types:**
+**Analysis Types**
 - `open-ended` - Custom prompt (requires `prompt` field)
 - `title` - Generate video title
 - `topic` - Identify main topics
@@ -98,143 +252,48 @@ http://localhost:5000
 - `chapter` - Break video into chapters
 - `highlight` - Extract key highlights
 
-**Streaming Response Format (TRUE LIVE STREAMING):**
-Returns newline-delimited JSON (NDJSON) chunks as they're generated by TwelveLabs AI in real-time:
-```json
-{"status": "success", "video_id": "6928f5903xxxxxx", "analysis_type": "open-ended", "streaming": true}
-{"chunk": "This video is an animated"}
-{"chunk": " short that centers around the"}
-{"chunk": " adventures of a large white"}
-{"chunk": " rabbit named Big Buck Bunny"}
-{"chunk": ". Early in the video"}
-{"chunk": ", Big Buck Bunny wakes"}
-{"chunk": " up in his bur"}
-{"chunk": "row, stretches, and"}
-{"done": true}
-```
-
-**Response Structure:**
-1. **Initial metadata** - Contains status, video_id, analysis_type, and streaming flag
-2. **Multiple chunks** - Text chunks streamed LIVE as TwelveLabs generates them
-3. **Completion marker** - `{"done": true}` indicates end of stream
 
 **Note:** This is TRUE server-sent streaming using TwelveLabs' `analyze_stream` API. Text appears in real-time as the AI generates it, not pre-fetched and split.
 
-**Error Response:**
-```json
-{
-  "error": "Error message"
-}
-```
-
----
-
-## Timestamp-based Analysis
-
-The API supports timestamp-based queries. You can ask questions about specific moments or request timestamped breakdowns.
-
-**Examples:**
-
-**Get key moments with timestamps:**
-```json
-{
-  "video_id": "6928f590xxxxxxxxx",
-  "prompt": "Provide a summary with timestamps for key moments",
-  "analysis_type": "open-ended"
-}
-```
-
-**Query specific timestamp:**
-```json
-{
-  "video_id": "6928f590xxxxxxx",
-  "prompt": "What happens at 2:30 in the video?",
-  "analysis_type": "open-ended"
-}
-```
-
-**Get chapters with timestamps:**
-```json
-{
-  "video_id": "6928f590xxxxxxx",
-  "analysis_type": "chapter"
-}
-```
-
----
-
-## Complete Workflow Example
-
-**Step 1: Download and Index**
-```bash
-curl -X POST http://localhost:5000/download-and-index \
-  -H "Content-Type: application/json" \
-  -d '{"youtube_url": "https://www.youtube.com/watch?v=aqxxxxxx"}'
-```
-
-Response:
-```json
-{
-  "status": "success",
-  "video_id": "6928f59xxxxxxxx",
-  "message": "Video downloaded and indexed successfully. Ready for analysis."
-}
-```
-
-**Step 2: Analyze with Timestamps (Streaming)**
-```bash
-curl -N -X POST http://localhost:5000/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "video_id": "6928fxxxxxxx,
-    "prompt": "List key moments with timestamps",
-    "analysis_type": "open-ended"
-  }'
-```
-
-Response (NDJSON stream):
-```json
-{"status": "success", "video_id": "6928xxxx, "analysis_type": "open-ended", "streaming": true}
-{"chunk": "- [0s-4s] Title "}
-{"chunk": "appears - [18s-26s] "}
-{"chunk": "Owl flies away "}
-{"chunk": "- [40s-53s] Rabbit "}
-{"chunk": "emerges from tree "}
-{"chunk": "hollow - [70s-79s] "}
-{"chunk": "Rabbit sniffs daisies..."}
-{"done": true}
-```
-
-**Note:** Use `-N` flag with curl to disable buffering and see real-time streaming.
-
----
-
-## Error Codes
-
-| HTTP Status | Description |
-|-------------|-------------|
-| 200 | Success |
-| 400 | Bad request (missing required fields) |
-| 404 | Video not found in TwelveLabs |
-| 500 | Server error or TwelveLabs API error |
 
 ---
 
 ## Environment Setup
 
-Required environment variables in `.env`:
+Required environment variables in `.env`
+
+### Complete .env Example
 ```
-TWELVELABS_API_KEY=your_api_key_here
+# TwelveLabs Configuration
+TWELVELABS_API_KEY=your_twelvelabs_api_key_here
 TWELVELABS_INDEX_ID=your_index_id_here
+
+# Browserbase Configuration (Required for /find-videos API)
+BROWSERBASE_API_KEY=your_browserbase_api_key_here
+BROWSERBASE_PROJECT_ID=your_browserbase_project_id_here
+
+# OpenAI Configuration (REQUIRED for /find-videos API - agentic automation)
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Proxy Configuration 
+PROXY_URL=http://username:password@proxy_host:port
+
+# Application Configuration (Optional)
+APP_URL=http://localhost:5000
 ```
 
----
 
-## Dependencies
+## Installation
 
-- Flask 3.0.0
-- yt-dlp 2025.11.12
-- twelvelabs 1.0.0
-- requests 2.31.0
-- python-dotenv 1.0.0
+1. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Install Playwright browsers:
+```bash
+playwright install chromium
+```
+
+3. Create a `.env` file with your API keys (see Environment Setup section above)
 

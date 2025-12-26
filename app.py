@@ -32,7 +32,7 @@ TEMP_DIR = os.path.join(os.path.dirname(__file__), 'temp_videos')
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 from routes import api
-app.register_blueprint(api)
+app.register_blueprint(api, url_prefix='/api')
 
 @app.route('/')
 def home():
@@ -42,9 +42,13 @@ def home():
         "version": "1.0.0",
         "status": "running",
         "endpoints": {
-            "health": "/health",
-            "download_and_index": "/download-and-index (POST)",
-            "analyze": "/analyze (POST)"
+            "health": "/api/health",
+            "download_and_index": "/api/download-and-index (POST)",
+            "analyze": "/api/analyze (POST)",
+            "find_videos": "/api/find-videos (POST)",
+            "index_videos": "/api/index-videos (POST)",
+            "agentic_chat": "/api/agentic-chat (POST)",
+            "agentic_chat_stream": "/api/agentic-chat/stream (POST)"
         },
         "documentation": "See README.md for full API documentation"
     }, 200
