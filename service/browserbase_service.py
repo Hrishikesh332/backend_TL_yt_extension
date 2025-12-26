@@ -310,6 +310,42 @@ class BrowserbaseService:
         return videos
 
     def _fetch_metadata_with_ytdlp(self, video: Dict) -> Dict:
+        video = self._fetch_metadata_via_oembed(video)
+        
+        if (not video.get('title') or video['title'].startswith('Video ')) or not video.get('duration'):
+            video = self._fetch_metadata_via_ytdlp(video)
+        
+        return video
+    
+    def _fetch_metadata_via_oembed(self, video: Dict) -> Dict:
+        try:
+            import urllib.request
+            import json
+            
+            video_url = video.get('url', '')
+            oembed_url = f"https://www.youtube.com/oembed?url={video_url}&format=json"
+            
+            req = urllib.request.Request(
+                oembed_url,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            )
+            
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                
+                if not video.get('title') or video['title'].startswith('Video '):
+                    video['title'] = data.get('title', video.get('title'))
+                
+                if not video.get('channelName'):
+                    video['channelName'] = data.get('author_name')
+                
+                print(f"[METADATA] oEmbed success: {video.get('title', 'Unknown')[:50]}")
+        except Exception as e:
+            print(f"[METADATA] oEmbed fetch failed: {e}")
+        
+        return video
+    
+    def _fetch_metadata_via_ytdlp(self, video: Dict) -> Dict:
         try:
             import yt_dlp
             
@@ -320,17 +356,12 @@ class BrowserbaseService:
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': False,
+                'skip_download': True,
+                'ignoreerrors': True,
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.5',
-                },
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['web', 'mweb'],
-                        'player_skip': ['webpage', 'configs'],
-                    }
                 },
                 'geo_bypass': True,
                 'nocheckcertificate': True,
@@ -338,13 +369,9 @@ class BrowserbaseService:
             
             if proxy_url:
                 ydl_opts['proxy'] = proxy_url
-                print(f"[METADATA] Using proxy for yt-dlp metadata fetch")
             
             if cookies_available:
                 ydl_opts['cookiefile'] = cookies_file
-                print(f"[METADATA] Using cookies file: {cookies_file}")
-            else:
-                print(f"[METADATA] Cookies file not found or empty, trying without cookies")
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video['url'], download=False)
@@ -368,8 +395,10 @@ class BrowserbaseService:
 
                     if not video.get('thumbnailUrl'):
                         video['thumbnailUrl'] = info.get('thumbnail') or (info.get('thumbnails', [{}])[0].get('url') if info.get('thumbnails') else None)
+                    
+                    print(f"[METADATA] yt-dlp success: {video.get('title', 'Unknown')[:50]}")
         except Exception as e:
-            print(f"yt-dlp metadata fetch failed: {e}")
+            print(f"[METADATA] yt-dlp fetch failed: {e}")
 
         return video
     
@@ -435,7 +464,6 @@ class BrowserbaseService:
                     
                     send_status("info", "Waiting for search results...")
                     page.wait_for_load_state("networkidle", timeout=15000)
-                    
                     page.wait_for_selector('ytd-video-renderer, ytd-rich-item-renderer, a[href*="/watch"]', timeout=10000)
                     time.sleep(3)
                     
