@@ -47,8 +47,7 @@ class AgenticService:
         if self.browserbase_api_key and self.browserbase_project_id:
             self.browserbase_service = BrowserbaseService(
                 browserbase_api_key=self.browserbase_api_key,
-                browserbase_project_id=self.browserbase_project_id,
-                openai_api_key=self.openai_api_key
+                browserbase_project_id=self.browserbase_project_id
             )
         
         self.twelvelabs_service = TwelveLabsService()
