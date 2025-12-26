@@ -7,20 +7,20 @@ from browserbase import Browserbase
 
 
 class BrowserbaseService:
-
-    def __init__(self,
-                 browserbase_api_key: Optional[str] = None,
+    
+    def __init__(self, 
+                 browserbase_api_key: Optional[str] = None, 
                  browserbase_project_id: Optional[str] = None):
         self.browserbase_api_key = browserbase_api_key or os.environ.get('BROWSERBASE_API_KEY', '')
         self.browserbase_project_id = browserbase_project_id or os.environ.get('BROWSERBASE_PROJECT_ID', '')
-
+        
         if not self.browserbase_api_key:
             raise ValueError("BROWSERBASE_API_KEY is required")
         if not self.browserbase_project_id:
             raise ValueError("BROWSERBASE_PROJECT_ID is required")
-
+        
         self.bb = Browserbase(api_key=self.browserbase_api_key)
-
+        
     def _extract_video_id(self, url: str) -> Optional[str]:
         if not url:
             return None
@@ -312,11 +312,39 @@ class BrowserbaseService:
     def _fetch_metadata_with_ytdlp(self, video: Dict) -> Dict:
         try:
             import yt_dlp
+            
+            proxy_url = os.environ.get('PROXY_URL')
+            cookies_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cookies.txt')
+            cookies_available = os.path.exists(cookies_file) and os.path.getsize(cookies_file) > 0
+            
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': False,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                },
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['web', 'mweb'],
+                        'player_skip': ['webpage', 'configs'],
+                    }
+                },
+                'geo_bypass': True,
+                'nocheckcertificate': True,
             }
+            
+            if proxy_url:
+                ydl_opts['proxy'] = proxy_url
+                print(f"[METADATA] Using proxy for yt-dlp metadata fetch")
+            
+            if cookies_available:
+                ydl_opts['cookiefile'] = cookies_file
+                print(f"[METADATA] Using cookies file: {cookies_file}")
+            else:
+                print(f"[METADATA] Cookies file not found or empty, trying without cookies")
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video['url'], download=False)
@@ -344,39 +372,39 @@ class BrowserbaseService:
             print(f"yt-dlp metadata fetch failed: {e}")
 
         return video
-
+    
     def discover_youtube_videos(self, search_query: str, max_videos: int = 3, status_callback=None) -> List[Dict]:
         def send_status(status, message):
             if status_callback:
                 status_callback(status, message)
             print(f"[{status}] {message}")
-
+        
         session = None
-
+        
         try:
             send_status("starting", "Starting browser automation to find YouTube videos...")
             send_status("info", f"Search query: '{search_query}'")
             send_status("info", f"Max videos to find: {max_videos}")
-
+            
             with sync_playwright() as playwright:
                 send_status("info", "Creating Browserbase session...")
                 session = self.bb.sessions.create(project_id=self.browserbase_project_id)
-
+                
                 print(f"Session created: {session.id}")
                 print(f"Watch live: https://browserbase.com/sessions/{session.id}")
-
+                
                 browser = playwright.chromium.connect_over_cdp(session.connect_url)
                 context = browser.contexts[0] if browser.contexts else browser.new_context()
                 page = context.pages[0] if context.pages else context.new_page()
-
+                
                 try:
                     send_status("info", "Navigating to YouTube...")
                     page.goto("https://www.youtube.com", wait_until="domcontentloaded")
                     page.wait_for_load_state("networkidle", timeout=10000)
                     time.sleep(2)
-
+                    
                     send_status("info", f"Searching for: '{search_query}'")
-
+                    
                     search_selectors = [
                         'input#search',
                         'input[name="search_query"]',
@@ -394,7 +422,7 @@ class BrowserbaseService:
                                 break
                         except:
                             continue
-
+                    
                     if search_input:
                         search_input.click()
                         time.sleep(0.3)
@@ -404,19 +432,19 @@ class BrowserbaseService:
                     else:
                         encoded_query = search_query.replace(' ', '+')
                         page.goto(f"https://www.youtube.com/results?search_query={encoded_query}", wait_until="domcontentloaded")
-
+                    
                     send_status("info", "Waiting for search results...")
                     page.wait_for_load_state("networkidle", timeout=15000)
-
+                    
                     page.wait_for_selector('ytd-video-renderer, ytd-rich-item-renderer, a[href*="/watch"]', timeout=10000)
                     time.sleep(3)
-
+                    
                     try:
                         page.evaluate("window.scrollTo(0, 500)")
                         time.sleep(1)
                     except:
                         pass
-
+                    
                     send_status("info", "Extracting video information...")
 
                     raw_videos = self._extract_videos_from_page(page, max_videos)
@@ -426,16 +454,16 @@ class BrowserbaseService:
                     for i, video in enumerate(raw_videos):
                         if len(filtered_videos) >= max_videos:
                             break
-
+                        
                         if i == 0:
                             print(f"Skipping first video (often ad): {video.get('title')}")
                             continue
-
+                        
                         title = video.get('title', '').strip()
                         if title.lower() in ['watch', 'ad', 'ads'] or (len(title) < 5 and title.lower() in ['ad', 'ads']):
                             print(f"Skipping likely ad: {title}")
                             continue
-
+                        
                         needs_metadata = (
                             not video.get('title') or
                             video['title'].startswith('Video ') or
@@ -452,7 +480,7 @@ class BrowserbaseService:
 
                         video.pop('videoId', None)
                         filtered_videos.append(video)
-
+                    
                     send_status("success", f"Found {len(filtered_videos)} videos")
 
                     for idx, video in enumerate(filtered_videos, 1):
@@ -461,17 +489,17 @@ class BrowserbaseService:
                         print(f"      Duration: {video.get('duration', 'N/A')}")
                         if video.get('channelName'):
                             print(f"      Channel: {video.get('channelName')}")
-
+                    
                     return filtered_videos
-
+                    
                 finally:
                     page.close()
                     browser.close()
-
+                    
         except Exception as e:
             send_status("error", f"Error in browser automation: {str(e)}")
             print(f"Error in browser automation: {str(e)}")
             raise
         finally:
             if session:
-                print(f"Session completed: {session.id}")
+                    print(f"Session completed: {session.id}")
