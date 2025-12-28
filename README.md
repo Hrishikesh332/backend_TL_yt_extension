@@ -59,13 +59,81 @@ http://localhost:5000
 
 **Streaming Endpoint:** `POST /api/agentic-chat/stream`
 
-Returns streaming responses as the agent processes your request.
+Returns real time Server Sent Events as the agent processes your request. Provides status updates during video discovery, indexing, and analysis.
 
-**Notes**
+**Request Body:**
+```json
+{
+  "query": "find videos about machine learning and index them",
+  "conversation_context": {
+    "auto_index": true,
+    "video_id": "optional_video_id"
+  }
+}
+```
+
+**Response Format:** Server-Sent Events (SSE) stream
+
+**Status Updates:**
+- `starting` - Request processing initiated
+- `info` - Informational updates (search query, video count, metadata fetching)
+- `completed` - Final response with results
+- `error` - Error occurred during processing
+
+**Real SSE Event Example:**
+```
+data: {"status": "starting", "message": "Processing your request...", "timestamp": "2025-12-28T14:23:45.123456"}
+
+data: {"status": "starting", "message": "Starting browser automation to find YouTube videos...", "timestamp": "2025-12-28T14:23:45.234567"}
+
+data: {"status": "info", "message": "Search query: 'machine learning tutorials'", "timestamp": "2025-12-28T14:23:45.345678"}
+
+data: {"status": "info", "message": "Max videos to find: 3", "timestamp": "2025-12-28T14:23:45.456789"}
+
+data: {"status": "info", "message": "Creating Browserbase session...", "timestamp": "2025-12-28T14:23:46.123456"}
+
+data: {"status": "info", "message": "Navigating to YouTube...", "timestamp": "2025-12-28T14:23:47.234567"}
+
+data: {"status": "info", "message": "Searching for: 'machine learning tutorials'", "timestamp": "2025-12-28T14:23:48.345678"}
+
+data: {"status": "info", "message": "Waiting for search results...", "timestamp": "2025-12-28T14:23:49.456789"}
+
+data: {"status": "info", "message": "Extracting video information...", "timestamp": "2025-12-28T14:23:52.123456"}
+
+data: {"status": "info", "message": "Found 5 raw videos", "timestamp": "2025-12-28T14:23:53.234567"}
+
+data: {"status": "info", "message": "Fetching metadata for video 1...", "timestamp": "2025-12-28T14:23:54.345678"}
+
+data: {"status": "info", "message": "Fetching metadata for video 2...", "timestamp": "2025-12-28T14:23:55.456789"}
+
+data: {"status": "completed", "response": "I found 3 video(s) for your search:\n\n1. **Machine Learning Tutorial for Beginners**\n   URL: https://www.youtube.com/watch?v=abc123\n   Duration: 15:30\n   Channel: Tech Education\n\n2. **Deep Learning Explained**\n   URL: https://www.youtube.com/watch?v=def456\n   Duration: 22:15\n   Channel: AI Academy\n\n3. **Neural Networks Crash Course**\n   URL: https://www.youtube.com/watch?v=ghi789\n   Duration: 18:45\n   Channel: Data Science Pro", "intent": "find_videos", "found_videos": [{"title": "Machine Learning Tutorial for Beginners", "url": "https://www.youtube.com/watch?v=abc123", "channelName": "Tech Education", "duration": "15:30", "thumbnailUrl": "https://i.ytimg.com/vi/abc123/hqdefault.jpg"}, {"title": "Deep Learning Explained", "url": "https://www.youtube.com/watch?v=def456", "channelName": "AI Academy", "duration": "22:15", "thumbnailUrl": "https://i.ytimg.com/vi/def456/hqdefault.jpg"}, {"title": "Neural Networks Crash Course", "url": "https://www.youtube.com/watch?v=ghi789", "channelName": "Data Science Pro", "duration": "18:45", "thumbnailUrl": "https://i.ytimg.com/vi/ghi789/hqdefault.jpg"}], "timestamp": "2025-12-28T14:24:02.123456"}
+```
+
+**Note:** Each SSE event follows the format `data: {JSON}\n\n` (data prefix, JSON payload, two newlines). The stream sends events in real-time as the agent processes your request.
+
+**Final Response Fields:**
+- `status` - "completed" or "error"
+- `response` - Final response message
+- `intent` - Detected intent (find_videos, analyze, index, chat)
+- `found_videos` - Array of discovered videos (if applicable)
+- `indexed_videos` - Array of indexed videos (if applicable)
+- `video_id` - Video ID for analysis (if applicable)
+- `analysis_result` - Analysis result (if applicable)
+- `timestamp` - ISO timestamp of the event
+
+**Usage Example:**
+```bash
+curl -X POST "http://localhost:5000/api/agentic-chat/stream" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "find videos about AI", "conversation_context": {"auto_index": false}}' \
+  -N
+```
+
+**Notes:**
 - Uses LangGraph for intelligent workflow orchestration
-- Automatically understands intent (find, analyze, index)
-- After finding videos, asks if you want to index them (unless auto_index is false)
-- Can handle conversational follow ups
+- Automatically understands intent (find, analyze, index, chat)
+- Provides real-time progress updates via SSE
+- After finding videos, automatically indexes them if `auto_index: true`
 - Combines Browserbase for video discovery and TwelveLabs for indexing/analysis
 
 ---
