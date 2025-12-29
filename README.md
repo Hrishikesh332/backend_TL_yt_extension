@@ -12,7 +12,12 @@ http://localhost:5000
 
 **Endpoint:** `POST /api/agentic-chat`
 
-**Description:** Agentic API that understands user intent and automatically routes to find videos, index them, or analyze existing videos. Uses LangGraph for state management and OpenAI for query understanding.
+**Description:** Agentic API that understands user intent and routes to find videos, index them, or analyze existing videos. Uses LangGraph for state management and OpenAI for query understanding.
+
+**Workflow:**
+1. **Find Videos**: When you search for videos, the API finds them and displays the results
+2. **Ask for Confirmation**: After showing videos, the API asks if you want to index them
+3. **Index on Confirmation**: Only indexes videos when you explicitly confirm (e.g., "yes", "index them")
 
 **Required Environment Variables:**
 - `OPENAI_API_KEY` - Your OpenAI API key (required)
@@ -23,9 +28,9 @@ http://localhost:5000
 **Request Body:**
 ```json
 {
-  "query": "find videos about machine learning and index them",
+  "query": "find videos about machine learning",
   "conversation_context": {
-    "auto_index": true,
+    "found_videos": [],
     "video_id": "optional_video_id"
   }
 }
@@ -34,14 +39,14 @@ http://localhost:5000
 **Request Parameters:**
 - `query` (required) - Natural language query describing what you want
 - `conversation_context` (optional) - Context from previous conversations
-  - `auto_index` (optional, default: true) - Automatically index found videos
+  - `found_videos` (optional) - Previously found videos (used when confirming indexing)
   - `video_id` (optional) - Video ID for analysis requests
 
-**Success Response:**
+**Success Response (After Finding Videos):**
 ```json
 {
   "status": "success",
-  "response": "I found 5 videos about machine learning. I'll index them for you...",
+  "response": "I found 3 video(s) for your search:\n\n1. **Machine Learning Tutorial**\n   URL: https://www.youtube.com/watch?v=...\n   Duration: 10:30\n   Channel: Tech Channel\n\n**Would you like me to index these videos so you can analyze them later?**\nReply 'yes' or 'index them' to proceed with indexing.",
   "intent": "find_videos",
   "found_videos": [
     {
@@ -50,10 +55,17 @@ http://localhost:5000
       "channelName": "Tech Channel",
       "duration": "10:30"
     }
-  ],
-  "indexed_videos": [...],
-  "video_id": "...",
-  "analysis_result": "..."
+  ]
+}
+```
+
+**Success Response (After Confirming Indexing):**
+```json
+{
+  "status": "success",
+  "response": "✅ Successfully indexed 3 video(s):\n  • Machine Learning Tutorial\n    Video ID: abc123 (indexed)\n\n💡 You can now analyze these videos by asking questions about them!",
+  "intent": "index",
+  "indexed_videos": [...]
 }
 ```
 
@@ -64,9 +76,9 @@ Returns real time Server Sent Events as the agent processes your request. Provid
 **Request Body:**
 ```json
 {
-  "query": "find videos about machine learning and index them",
+  "query": "find videos about machine learning",
   "conversation_context": {
-    "auto_index": true,
+    "found_videos": [],
     "video_id": "optional_video_id"
   }
 }
@@ -123,9 +135,16 @@ data: {"status": "completed", "response": "I found 3 video(s) for your search:\n
 
 **Usage Example:**
 ```bash
+# Step 1: Find videos
 curl -X POST "http://localhost:5000/api/agentic-chat/stream" \
   -H "Content-Type: application/json" \
-  -d '{"query": "find videos about AI", "conversation_context": {"auto_index": false}}' \
+  -d '{"query": "find videos about AI"}' \
+  -N
+
+# Step 2: Confirm indexing (use found_videos from previous response)
+curl -X POST "http://localhost:5000/api/agentic-chat/stream" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "yes index them", "conversation_context": {"found_videos": [...]}}' \
   -N
 ```
 
@@ -133,7 +152,8 @@ curl -X POST "http://localhost:5000/api/agentic-chat/stream" \
 - Uses LangGraph for intelligent workflow orchestration
 - Automatically understands intent (find, analyze, index, chat)
 - Provides real-time progress updates via SSE
-- After finding videos, automatically indexes them if `auto_index: true`
+- **Two-step process**: First shows found videos, then asks for confirmation before indexing
+- Only indexes videos when user explicitly confirms (e.g., "yes", "index them")
 - Combines Browserbase for video discovery and TwelveLabs for indexing/analysis
 
 ---

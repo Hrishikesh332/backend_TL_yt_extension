@@ -530,4 +530,4 @@ class BrowserbaseService:
             raise
         finally:
             if session:
-                    print(f"Session completed: {session.id}")
+                print(f"Session completed: {session.id}")
