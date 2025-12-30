@@ -56,7 +56,7 @@ def home():
 def wake_up_app():
     try:
         app_url = os.getenv('APP_URL', 'http://localhost:5000')
-        health_url = f"{app_url}/health"
+        health_url = f"{app_url}/api/health"
         response = requests.get(health_url, timeout=9)
         if response.status_code == 200:
             print(f"Successfully pinged {health_url} at {datetime.now()}")

@@ -350,8 +350,17 @@ class BrowserbaseService:
             import yt_dlp
             
             proxy_url = os.environ.get('PROXY_URL')
-            cookies_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cookies.txt')
-            cookies_available = os.path.exists(cookies_file) and os.path.getsize(cookies_file) > 0
+            cookies_file = None
+            cookies_paths = [
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cookies.txt'),
+                '/etc/secrets/cookies.txt',
+                os.path.join(os.getcwd(), 'cookies.txt'),
+            ]
+            for path in cookies_paths:
+                if os.path.exists(path) and os.path.getsize(path) > 0:
+                    cookies_file = path
+                    break
+            cookies_available = cookies_file is not None
             
             ydl_opts = {
                 'quiet': True,
