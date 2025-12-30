@@ -81,19 +81,22 @@ def download_youtube_video(url, output_path):
     else:
         print("[PROXY] No proxy configured.")
     
-    # Strategy: Prioritize proxy (which was working before), then try cookies combinations
+    # Strategy: Use proxy-first approach (as it was working before)
+    # When proxy is available, use it with web/mweb clients (as previous working version)
     strategies = []
     
-    # Proxy was working before, so try it first
+    # Proxy was working before - use it first with the client strategies that worked
     if proxy_url:
-        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only'})
-        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': True, 'name': 'Proxy + FakeIP'})
+        # Use the exact client order that worked before: ['web'], ['mweb'], ['android'], ['ios']
+        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (web client)', 'client_order': ['web']})
+        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (mweb client)', 'client_order': ['mweb']})
+        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (android client)', 'client_order': ['android']})
+        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (ios client)', 'client_order': ['ios']})
     
     # Then try cookies combinations
     if cookies_available:
         if proxy_url:
             strategies.append({'use_cookies': True, 'use_proxy': True, 'fake_ip': False, 'name': 'Cookies + Proxy'})
-            strategies.append({'use_cookies': True, 'use_proxy': True, 'fake_ip': True, 'name': 'Cookies + Proxy + FakeIP'})
         strategies.append({'use_cookies': True, 'use_proxy': False, 'fake_ip': False, 'name': 'Cookies only'})
     
     # Fallback: no cookies, no proxy
@@ -144,8 +147,17 @@ def download_youtube_video(url, output_path):
                     geo_country = fake_config['country']
                     print(f"[FAKE-IP] Using IP: {fake_config['ip']} Country: {geo_country}")
                 
+                # Choose player client - use specific client from strategy if specified
+                # Otherwise use default based on proxy usage
+                if 'client_order' in strategy:
+                    player_clients = strategy['client_order']
+                elif strategy['use_proxy'] and proxy_url:
+                    player_clients = ['web', 'mweb', 'ios', 'android']  # Fallback
+                else:
+                    player_clients = ['ios', 'android']
+                
                 ydl_opts = {
-                    'format': '18/22/best[ext=mp4]/best',
+                    'format': '18/22/135+140/134+140/best[ext=mp4]/best',  # Use formats that worked before
                     'outtmpl': output_path,
                     'quiet': False,
                     'no_warnings': True,
@@ -155,7 +167,7 @@ def download_youtube_video(url, output_path):
                     'http_headers': http_headers,
                     'extractor_args': {
                         'youtube': {
-                            'player_client': ['ios', 'android'],
+                            'player_client': player_clients,
                             'player_skip': ['webpage', 'configs'],
                         }
                     },
@@ -169,7 +181,7 @@ def download_youtube_video(url, output_path):
                     'source_address': '0.0.0.0',
                 }
                 
-                # Apply strategy - set proxy first
+                # Apply strategy - set proxy first and ensure it's used
                 if strategy['use_proxy'] and proxy_url:
                     ydl_opts['proxy'] = proxy_url
                     # Set proxy env vars for all subprocess calls
@@ -177,7 +189,10 @@ def download_youtube_video(url, output_path):
                     os.environ['HTTPS_PROXY'] = proxy_url
                     os.environ['http_proxy'] = proxy_url
                     os.environ['https_proxy'] = proxy_url
+                    # Also set for requests library
+                    ydl_opts['http_chunk_size'] = 10485760  # 10MB chunks
                     print(f"[PROXY] Using proxy: {proxy_url[:50]}...")
+                    print(f"[PROXY] Player clients: {player_clients}")
                 else:
                     # Clear proxy env vars to ensure no proxy is used
                     for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
@@ -189,6 +204,11 @@ def download_youtube_video(url, output_path):
                     ydl_opts['cookiefile'] = cookies_file
                 
                 print(f"[DOWNLOAD] Attempt {attempt + 1}/3")
+                
+                # Verify proxy is set correctly
+                if strategy['use_proxy'] and proxy_url:
+                    print(f"[DEBUG] Proxy in ydl_opts: {ydl_opts.get('proxy', 'NOT SET')}")
+                    print(f"[DEBUG] HTTP_PROXY env: {os.environ.get('HTTP_PROXY', 'NOT SET')[:50] if os.environ.get('HTTP_PROXY') else 'NOT SET'}")
                 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     print(f"[DOWNLOAD] Extracting video info from: {url}")
