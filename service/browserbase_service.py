@@ -473,7 +473,7 @@ class BrowserbaseService:
                     
                     send_status("info", "Waiting for search results...")
                     page.wait_for_load_state("networkidle", timeout=15000)
-                        page.wait_for_selector('ytd-video-renderer, ytd-rich-item-renderer, a[href*="/watch"]', timeout=10000)
+                    page.wait_for_selector('ytd-video-renderer, ytd-rich-item-renderer, a[href*="/watch"]', timeout=10000)
                     time.sleep(3)
                     
                     try:
