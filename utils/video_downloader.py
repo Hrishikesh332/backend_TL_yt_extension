@@ -1,13 +1,15 @@
 import yt_dlp
 import os
 import time
+import shutil
+import tempfile
 
 
 def download_youtube_video(url, output_path):
     proxy_url = os.environ.get('PROXY_URL')
     
     # Get cookies file path - check multiple locations
-    cookies_file = None
+    cookies_source = None
     cookies_paths = [
         '/etc/secrets/cookies.txt',  # Render deployment (check first)
         os.path.join(os.path.dirname(os.path.dirname(__file__)), 'cookies.txt'),  # Local: project root
@@ -29,16 +31,47 @@ def download_youtube_video(url, output_path):
                 print(f"[DEBUG]   {path}: exists but cannot read: {e}")
         print(f"[DEBUG]   {path}: exists={exists}, size={size}, readable={readable}")
         if exists and size > 0 and readable:
-            cookies_file = path
-            print(f"[DEBUG] ✅ Using cookies from: {cookies_file}")
+            cookies_source = path
+            print(f"[DEBUG] ✅ Found cookies at: {cookies_source}")
             print(f"[DEBUG]   First line: {first_line[:50]}...")
             break
     
-    cookies_available = cookies_file is not None
+    cookies_available = cookies_source is not None
+    cookies_file = None
+    
+    if cookies_available:
+        # If source is read-only (like /etc/secrets/), copy to writable location
+        if cookies_source.startswith('/etc/secrets/'):
+            try:
+                temp_dir = tempfile.gettempdir()
+                cookies_file = os.path.join(temp_dir, 'cookies_ytdlp.txt')
+                shutil.copy2(cookies_source, cookies_file)
+                # Make sure it's writable
+                os.chmod(cookies_file, 0o644)
+                print(f"[DEBUG] ✅ Copied cookies to writable location: {cookies_file}")
+            except Exception as e:
+                print(f"[DEBUG] ⚠️  Failed to copy cookies: {e}")
+                cookies_file = cookies_source  # Fallback to original (may fail if yt-dlp writes)
+        else:
+            # Check if original location is writable
+            if os.access(cookies_source, os.W_OK):
+                cookies_file = cookies_source
+            else:
+                # Copy to temp if not writable
+                try:
+                    temp_dir = tempfile.gettempdir()
+                    cookies_file = os.path.join(temp_dir, 'cookies_ytdlp.txt')
+                    shutil.copy2(cookies_source, cookies_file)
+                    os.chmod(cookies_file, 0o644)
+                    print(f"[DEBUG] ✅ Copied cookies to writable location: {cookies_file}")
+                except Exception as e:
+                    print(f"[DEBUG] ⚠️  Failed to copy cookies: {e}")
+                    cookies_file = cookies_source  # Fallback
+    
     if not cookies_available:
         print(f"[DEBUG] ❌ No cookies file found in any location")
     
-    if cookies_available:
+    if cookies_available and cookies_file:
         print(f"[COOKIES] Using cookies file: {cookies_file}")
     else:
         print("[COOKIES] No cookies file found")
@@ -48,18 +81,20 @@ def download_youtube_video(url, output_path):
     else:
         print("[PROXY] No proxy configured.")
     
-    # Strategy: Try different combinations
+    # Strategy: Prioritize proxy (which was working before), then try cookies combinations
     strategies = []
     
-    if cookies_available:
-        strategies.append({'use_cookies': True, 'use_proxy': False, 'fake_ip': False, 'name': 'Cookies only'})
-        if proxy_url:
-            strategies.append({'use_cookies': True, 'use_proxy': True, 'fake_ip': False, 'name': 'Cookies + Proxy'})
-            strategies.append({'use_cookies': True, 'use_proxy': True, 'fake_ip': True, 'name': 'Cookies + Proxy + FakeIP'})
-    
+    # Proxy was working before, so try it first
     if proxy_url:
         strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only'})
         strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': True, 'name': 'Proxy + FakeIP'})
+    
+    # Then try cookies combinations
+    if cookies_available:
+        if proxy_url:
+            strategies.append({'use_cookies': True, 'use_proxy': True, 'fake_ip': False, 'name': 'Cookies + Proxy'})
+            strategies.append({'use_cookies': True, 'use_proxy': True, 'fake_ip': True, 'name': 'Cookies + Proxy + FakeIP'})
+        strategies.append({'use_cookies': True, 'use_proxy': False, 'fake_ip': False, 'name': 'Cookies only'})
     
     # Fallback: no cookies, no proxy
     strategies.append({'use_cookies': False, 'use_proxy': False, 'fake_ip': False, 'name': 'Direct'})
@@ -67,6 +102,11 @@ def download_youtube_video(url, output_path):
     last_error = None
     
     for strategy_idx, strategy in enumerate(strategies):
+        # Wait 6 seconds between strategies (except for the first one)
+        if strategy_idx > 0:
+            print(f"\n[WAIT] Waiting 6 seconds before next strategy...")
+            time.sleep(6)
+        
         print(f"\n[STRATEGY {strategy_idx + 1}/{len(strategies)}] {strategy['name']}")
         
         for attempt in range(3):
@@ -129,18 +169,21 @@ def download_youtube_video(url, output_path):
                     'source_address': '0.0.0.0',
                 }
                 
-                # Apply strategy
+                # Apply strategy - set proxy first
                 if strategy['use_proxy'] and proxy_url:
                     ydl_opts['proxy'] = proxy_url
+                    # Set proxy env vars for all subprocess calls
                     os.environ['HTTP_PROXY'] = proxy_url
                     os.environ['HTTPS_PROXY'] = proxy_url
                     os.environ['http_proxy'] = proxy_url
                     os.environ['https_proxy'] = proxy_url
+                    print(f"[PROXY] Using proxy: {proxy_url[:50]}...")
                 else:
-                    # Clear proxy env vars
+                    # Clear proxy env vars to ensure no proxy is used
                     for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
                         if key in os.environ:
                             del os.environ[key]
+                    print(f"[PROXY] Proxy disabled for this strategy")
                 
                 if strategy['use_cookies'] and cookies_available:
                     ydl_opts['cookiefile'] = cookies_file
