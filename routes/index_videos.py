@@ -1,9 +1,10 @@
 from flask import request, jsonify
 import os
 import uuid
+import threading
 from . import api
 from utils.video_downloader import download_youtube_video
-from utils.video_processor import get_video_duration, clip_video
+from utils.video_processor import get_video_duration_from_file, clip_video
 from service.twelvelabs_service import TwelveLabsService
 
 twelvelabs_service = None
@@ -110,66 +111,148 @@ def index_videos():
                 
                 print(f"Video downloaded: {downloaded_path}")
                 
-                # Check video duration and clip if longer than 1 hour
-                video_segments = clip_video(downloaded_path, temp_dir, segment_duration=3600)
-                print(f"Video segments to index: {len(video_segments)}")
+                # Check video duration first
+                duration = get_video_duration_from_file(downloaded_path)
+                is_long_video = duration is not None and duration > 3600
                 
-                # Index each segment
-                segment_video_ids = []
-                for segment_idx, segment_path in enumerate(video_segments):
-                    try:
-                        print(f"Indexing segment {segment_idx + 1}/{len(video_segments)}: {segment_path}")
+                if is_long_video:
+                    print(f"Video is longer than 1 hour ({duration/60:.2f} minutes), will clip and index first chunk immediately")
+                    video_segments = clip_video(downloaded_path, temp_dir, segment_duration=3600)
+                    print(f"Video segments created: {len(video_segments)}")
+                    
+                    if len(video_segments) > 1:
+                        # Index first segment immediately
+                        first_segment = video_segments[0]
+                        print(f"Indexing first segment immediately: {first_segment}")
                         result = service.upload_video_file(
                             index_id=index_id,
-                            file_path=segment_path
+                            file_path=first_segment
                         )
                         
-                        if 'error' in result:
-                            print(f"Error indexing segment {segment_idx + 1}: {result.get('error')}")
+                        if 'error' in result or not result.get("video_id"):
+                            failed_videos.append({
+                                "video_url": video_url,
+                                "error": f"Failed to index first segment: {result.get('error', 'Unknown error')}"
+                            })
                             continue
                         
-                        video_id_from_indexing = result.get("video_id")
-                        if video_id_from_indexing:
-                            segment_video_ids.append(video_id_from_indexing)
-                            print(f"Segment {segment_idx + 1} indexed successfully: {video_id_from_indexing}")
-                    except Exception as e:
-                        print(f"Error indexing segment {segment_idx + 1}: {str(e)}")
-                    finally:
-                        # Clean up segment file (keep original if it's the only segment)
-                        if segment_path != downloaded_path and os.path.exists(segment_path):
+                        first_video_id = result.get("video_id")
+                        print(f"First segment indexed successfully: {first_video_id}")
+                        
+                        # Clean up first segment file
+                        if first_segment != downloaded_path and os.path.exists(first_segment):
                             try:
-                                os.remove(segment_path)
-                                print(f"Segment file deleted: {segment_path}")
+                                os.remove(first_segment)
                             except Exception as e:
-                                print(f"Warning: Could not delete segment file: {e}")
-                
-                # Clean up original downloaded file
-                try:
-                    if os.path.exists(downloaded_path):
-                        os.remove(downloaded_path)
-                        print(f"Temp file deleted: {downloaded_path}")
-                except Exception as e:
-                    print(f"Warning: Could not delete temp file: {e}")
-                
-                if not segment_video_ids:
-                    failed_videos.append({
-                        "video_url": video_url,
-                        "error": "Failed to index any video segments"
-                    })
-                    continue
-                
-                # If multiple segments, return all video IDs
-                if len(segment_video_ids) > 1:
-                    indexed_videos.append({
-                        "video_url": video_url,
-                        "video_id": segment_video_ids,  # List of video IDs
-                        "status": "indexed",
-                        "segments": len(segment_video_ids)
-                    })
+                                print(f"Warning: Could not delete first segment file: {e}")
+                        
+                        # Process remaining segments in background
+                        def index_remaining_segments(segments, original_path):
+                            remaining_segments = segments[1:]
+                            for segment_idx, segment_path in enumerate(remaining_segments, start=2):
+                                try:
+                                    print(f"[BACKGROUND] Indexing segment {segment_idx}/{len(segments)}: {segment_path}")
+                                    result = service.upload_video_file(
+                                        index_id=index_id,
+                                        file_path=segment_path
+                                    )
+                                    if 'error' not in result and result.get("video_id"):
+                                        print(f"[BACKGROUND] Segment {segment_idx} indexed: {result.get('video_id')}")
+                                except Exception as e:
+                                    print(f"[BACKGROUND] Error indexing segment {segment_idx}: {str(e)}")
+                                finally:
+                                    if segment_path != original_path and os.path.exists(segment_path):
+                                        try:
+                                            os.remove(segment_path)
+                                        except:
+                                            pass
+                            
+                            # Clean up original file after all segments processed
+                            if os.path.exists(original_path):
+                                try:
+                                    os.remove(original_path)
+                                    print(f"[BACKGROUND] Original file deleted: {original_path}")
+                                except:
+                                    pass
+                        
+                        thread = threading.Thread(
+                            target=index_remaining_segments,
+                            args=(video_segments, downloaded_path),
+                            daemon=True
+                        )
+                        thread.start()
+                        
+                        indexed_videos.append({
+                            "video_url": video_url,
+                            "video_id": first_video_id,
+                            "status": "indexed",
+                            "segments": len(video_segments),
+                            "remaining_segments_processing": True,
+                            "message": f"First segment indexed. {len(video_segments)-1} remaining segment(s) processing in background."
+                        })
+                    else:
+                        # Only one segment (shouldn't happen if duration > 3600, but handle it)
+                        result = service.upload_video_file(
+                            index_id=index_id,
+                            file_path=video_segments[0]
+                        )
+                        if 'error' in result or not result.get("video_id"):
+                            failed_videos.append({
+                                "video_url": video_url,
+                                "error": f"Failed to index video: {result.get('error', 'Unknown error')}"
+                            })
+                            continue
+                        
+                        if video_segments[0] != downloaded_path and os.path.exists(video_segments[0]):
+                            try:
+                                os.remove(video_segments[0])
+                            except:
+                                pass
+                        
+                        if os.path.exists(downloaded_path):
+                            try:
+                                os.remove(downloaded_path)
+                            except:
+                                pass
+                        
+                        indexed_videos.append({
+                            "video_url": video_url,
+                            "video_id": result.get("video_id"),
+                            "status": "indexed"
+                        })
                 else:
+                    # Video is 1 hour or less - process normally (no changes)
+                    print(f"Video is {duration/60:.2f if duration else 'unknown'} minutes, processing normally")
+                    result = service.upload_video_file(
+                        index_id=index_id,
+                        file_path=downloaded_path
+                    )
+                    
+                    try:
+                        if os.path.exists(downloaded_path):
+                            os.remove(downloaded_path)
+                            print(f"Temp file deleted: {downloaded_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not delete temp file: {e}")
+                    
+                    if 'error' in result:
+                        failed_videos.append({
+                            "video_url": video_url,
+                            "error": result.get('error')
+                        })
+                        continue
+                    
+                    video_id_from_indexing = result.get("video_id")
+                    if not video_id_from_indexing:
+                        failed_videos.append({
+                            "video_url": video_url,
+                            "error": "Indexing completed but no video_id returned"
+                        })
+                        continue
+                    
                     indexed_videos.append({
                         "video_url": video_url,
-                        "video_id": segment_video_ids[0],
+                        "video_id": video_id_from_indexing,
                         "status": "indexed"
                     })
                 
