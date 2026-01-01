@@ -10,6 +10,7 @@ from langgraph.prebuilt import ToolNode  # type: ignore
 from langchain_core.tools import tool  # type: ignore
 from service.browserbase_service import BrowserbaseService
 from service.twelvelabs_service import TwelveLabsService
+from utils.video_processor import clip_video
 import uuid
 
 
@@ -317,34 +318,55 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
                 from utils.video_downloader import download_youtube_video
                 downloaded_path = download_youtube_video(video_url, video_path)
                 
-                if status_callback:
-                    try:
-                        status_callback("uploading", f"Uploading to TwelveLabs: {video_title[:50]}...")
-                    except Exception:
-                        pass
+                # Check video duration and clip if longer than 1 hour
+                video_segments = clip_video(downloaded_path, temp_dir, segment_duration=3600)
+                print(f"Video segments to index: {len(video_segments)}")
                 
-                result = self.twelvelabs_service.upload_video_file(
-                    index_id=self.index_id,
-                    file_path=downloaded_path
-                )
+                # Index each segment
+                segment_video_ids = []
+                for segment_idx, segment_path in enumerate(video_segments):
+                    if status_callback:
+                        try:
+                            status_callback("uploading", f"Uploading segment {segment_idx + 1}/{len(video_segments)} to TwelveLabs: {video_title[:50]}...")
+                        except Exception:
+                            pass
+                    
+                    result = self.twelvelabs_service.upload_video_file(
+                        index_id=self.index_id,
+                        file_path=segment_path
+                    )
+                    
+                    # Clean up segment file (keep original if it's the only segment)
+                    if segment_path != downloaded_path:
+                        try:
+                            if os.path.exists(segment_path):
+                                os.remove(segment_path)
+                        except:
+                            pass
+                    
+                    if 'error' not in result and result.get("video_id"):
+                        segment_video_ids.append(result.get("video_id"))
                 
-                # Clean up
+                # Clean up original downloaded file
                 try:
                     if os.path.exists(downloaded_path):
                         os.remove(downloaded_path)
                 except:
                     pass
                 
-                if 'error' not in result and result.get("video_id"):
+                if segment_video_ids:
+                    # If multiple segments, use first video_id for compatibility, but note segments
                     indexed_results.append({
                         "video": video,
-                        "video_id": result.get("video_id"),
+                        "video_id": segment_video_ids[0] if len(segment_video_ids) == 1 else segment_video_ids,
+                        "video_ids": segment_video_ids,
+                        "segments": len(segment_video_ids),
                         "status": "indexed"
                     })
                 else:
                     failed_results.append({
                         "video": video,
-                        "error": result.get("error", "Unknown error")
+                        "error": "Failed to index any video segments"
                     })
                     
             except Exception as e:

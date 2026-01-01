@@ -3,6 +3,7 @@ import os
 import uuid
 from . import api
 from utils.video_downloader import download_youtube_video
+from utils.video_processor import clip_video
 from service.twelvelabs_service import TwelveLabsService
 
 twelvelabs_service = None
@@ -59,33 +60,43 @@ def download_and_index():
         
         print(f"Video downloaded to: {downloaded_path}")
         
+        # Check video duration and clip if longer than 1 hour
+        video_segments = clip_video(downloaded_path, temp_dir, segment_duration=3600)
+        print(f"Video segments to index: {len(video_segments)}")
+        
         service = get_twelvelabs_service()
         
-        print(f"Indexing video in TwelveLabs with index_id: {index_id}")
-        result = service.upload_video_file(
-            index_id=index_id,
-            file_path=downloaded_path
-        )
-        
-        if 'error' in result:
-            print(f"ERROR: TwelveLabs upload failed: {result.get('error')}")
-            print(f"Full result: {result}")
+        # Index each segment
+        segment_video_ids = []
+        for segment_idx, segment_path in enumerate(video_segments):
             try:
-                if os.path.exists(downloaded_path):
-                    os.remove(downloaded_path)
+                print(f"Indexing segment {segment_idx + 1}/{len(video_segments)} in TwelveLabs with index_id: {index_id}")
+                result = service.upload_video_file(
+                    index_id=index_id,
+                    file_path=segment_path
+                )
+                
+                if 'error' in result:
+                    print(f"ERROR: TwelveLabs upload failed for segment {segment_idx + 1}: {result.get('error')}")
+                    print(f"Full result: {result}")
+                    continue
+                
+                video_id_from_indexing = result.get("video_id")
+                if video_id_from_indexing:
+                    segment_video_ids.append(video_id_from_indexing)
+                    print(f"Segment {segment_idx + 1} indexed successfully: {video_id_from_indexing}")
             except Exception as e:
-                print(f"Warning: Could not delete temp file after error: {e}")
-            return jsonify(result), 500
+                print(f"Error indexing segment {segment_idx + 1}: {str(e)}")
+            finally:
+                # Clean up segment file (keep original if it's the only segment)
+                if segment_path != downloaded_path and os.path.exists(segment_path):
+                    try:
+                        os.remove(segment_path)
+                        print(f"Segment file deleted: {segment_path}")
+                    except Exception as e:
+                        print(f"Warning: Could not delete segment file: {e}")
         
-        video_id_from_indexing = result.get("video_id")
-        if not video_id_from_indexing:
-            try:
-                if os.path.exists(downloaded_path):
-                    os.remove(downloaded_path)
-            except Exception as e:
-                print(f"Warning: Could not delete temp file after error: {e}")
-            return jsonify({"error": "Indexing completed but no video_id returned"}), 500
-        
+        # Clean up original downloaded file
         try:
             if os.path.exists(downloaded_path):
                 os.remove(downloaded_path)
@@ -93,11 +104,24 @@ def download_and_index():
         except Exception as e:
             print(f"Warning: Could not delete temp file: {e}")
         
-        return jsonify({
-            "status": "success",
-            "video_id": video_id_from_indexing,
-            "message": "Video downloaded and indexed successfully. Ready for analysis."
-        }), 200
+        if not segment_video_ids:
+            return jsonify({"error": "Failed to index any video segments"}), 500
+        
+        # If multiple segments, return all video IDs
+        if len(segment_video_ids) > 1:
+            return jsonify({
+                "status": "success",
+                "video_id": segment_video_ids,  # List of video IDs
+                "video_ids": segment_video_ids,  # Alternative key for clarity
+                "segments": len(segment_video_ids),
+                "message": f"Video downloaded and indexed successfully as {len(segment_video_ids)} segment(s). Ready for analysis."
+            }), 200
+        else:
+            return jsonify({
+                "status": "success",
+                "video_id": segment_video_ids[0],
+                "message": "Video downloaded and indexed successfully. Ready for analysis."
+            }), 200
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
