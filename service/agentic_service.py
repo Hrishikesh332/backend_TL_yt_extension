@@ -56,22 +56,22 @@ class AgenticService:
             api_key=self.openai_api_key
         )
         
-        self.graph = self._build_graph()
+        self.graph = self.build_graph()
     
-    def _build_graph(self) -> StateGraph:
+    def build_graph(self) -> StateGraph:
         workflow = StateGraph(AgentState)
         
-        workflow.add_node("classify_intent", self._classify_intent)
-        workflow.add_node("find_videos", self._find_videos)
-        workflow.add_node("index_videos", self._index_videos)
-        workflow.add_node("analyze_video", self._analyze_video)
-        workflow.add_node("respond", self._respond)
+        workflow.add_node("classify_intent", self.classify_intent)
+        workflow.add_node("find_videos", self.find_videos)
+        workflow.add_node("index_videos", self.index_videos)
+        workflow.add_node("analyze_video", self.analyze_video)
+        workflow.add_node("respond", self.respond)
         
         workflow.set_entry_point("classify_intent")
         
         workflow.add_conditional_edges(
             "classify_intent",
-            self._route_after_classify,
+            self.route_after_classify,
             {
                 "chat": "respond",
                 "find_videos": "find_videos",
@@ -94,52 +94,42 @@ class AgenticService:
         
         return workflow.compile()
     
-    def _classify_intent(self, state: AgentState) -> AgentState:
+    def classify_intent(self, state: AgentState) -> AgentState:
         user_query = state.get("user_query", "")
         conversation_context = state.get("conversation_context", {})
         
-        # Check if user is confirming indexing of previously found videos
-        query_lower = user_query.lower().strip()
-        
-        # Check for indexing confirmation patterns
-        indexing_confirmations = [
-            "yes", "yes index", "yes please", "index them", "index these", 
-            "go ahead", "proceed", "do it", "index the videos", "yes index them",
-            "index all", "index please", "sure", "ok index", "okay index",
-            "yep", "yeah", "confirm", "index now"
-        ]
-        
-        # Check if this looks like a confirmation to index
-        is_index_confirmation = any(query_lower == phrase or query_lower.startswith(phrase + " ") for phrase in indexing_confirmations)
-        
-        # Also check if context has previously found videos
+        # Check if context has previously found videos that haven't been indexed yet
         has_previous_videos = bool(conversation_context.get("found_videos"))
         
-        if is_index_confirmation and has_previous_videos:
-            state["intent"] = "index"
-            state["found_videos"] = conversation_context.get("found_videos", [])
-            state["selected_videos"] = conversation_context.get("found_videos", [])
-            return state
-        
         system_prompt = """You are an intelligent assistant that helps users with YouTube video operations.
-Your task is to classify the user's intent from their query.
+Your task is to classify the user's intent from their query, considering the conversation context.
 
 Possible intents:
 1. "chat" - User is asking questions about capabilities, greetings, general conversation
 2. "find_videos" - User wants to search for/find YouTube videos (e.g., "find videos about AI", "search for tutorials")
-3. "index" - User wants to index specific videos they already have URLs for (e.g., "index this video: URL", "index https://youtube.com/...")
+3. "index" - User wants to index videos. This includes:
+   - Providing specific video URLs to index (e.g., "index this video: URL", "index https://youtube.com/...")
+   - Confirming indexing of previously found videos (e.g., "yes", "go ahead", "index them", "sure", "proceed", etc.)
+   - Any affirmative response when videos were previously found and the user was asked if they want to index them
 4. "analyze" - User wants to analyze an already indexed video (e.g., "analyze video X", "what's in this video")
 
-IMPORTANT: 
+IMPORTANT CONTEXT AWARENESS:
+- If the conversation context shows that videos were previously found (found_videos exists), and the user's query is an affirmative response (yes, sure, go ahead, index them, etc.), classify as "index"
 - If user just wants to "find" or "search" videos, use "find_videos"
-- Only use "index" if user provides specific video URLs to index
+- If user provides specific video URLs to index, use "index"
 - Questions about capabilities should use "chat"
+- Consider the conversational flow: if videos were found in previous messages and user is responding affirmatively, they likely want to index
 
 Respond with ONLY the intent name (one of: chat, find_videos, index, analyze)."""
         
+        context_info = ""
+        if has_previous_videos:
+            found_videos = conversation_context.get("found_videos", [])
+            context_info = f"\n\nCONVERSATION CONTEXT:\n- Previously found {len(found_videos)} video(s) that haven't been indexed yet\n- The user was likely asked if they want to index these videos\n- Consider if the current query is a confirmation/affirmative response to index those videos"
+        
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"User query: {user_query}\n\nContext: {json.dumps(conversation_context, indent=2)}")
+            HumanMessage(content=f"User query: {user_query}{context_info}\n\nFull context: {json.dumps(conversation_context, indent=2)}")
         ]
         
         response = self.llm.invoke(messages)
@@ -148,10 +138,15 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
         if intent not in ["chat", "find_videos", "index", "analyze"]:
             intent = "chat"
         
+        # If LLM classified as index and we have previous videos, populate them
+        if intent == "index" and has_previous_videos:
+            state["found_videos"] = conversation_context.get("found_videos", [])
+            state["selected_videos"] = conversation_context.get("found_videos", [])
+        
         state["intent"] = intent
         return state
     
-    def _find_videos(self, state: AgentState) -> AgentState:
+    def find_videos(self, state: AgentState) -> AgentState:
         user_query = state.get("user_query", "")
         
         if not self.browserbase_service:
@@ -244,7 +239,7 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
         
         return state
     
-    def _index_videos(self, state: AgentState) -> AgentState:
+    def index_videos(self, state: AgentState) -> AgentState:
         selected_videos = state.get("selected_videos", [])
         conversation_context = state.get("conversation_context", {})
         
@@ -452,7 +447,8 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
                             })
                 else:
                     # Video is 1 hour or less - process normally (no changes)
-                    print(f"Video is {duration/60:.2f if duration else 'unknown'} minutes, processing normally")
+                    duration_str = f"{duration/60:.2f}" if duration else "unknown"
+                    print(f"Video is {duration_str} minutes, processing normally")
                     if status_callback:
                         try:
                             status_callback("uploading", f"Uploading to TwelveLabs: {video_title[:50]}...")
@@ -529,7 +525,7 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
         
         return state
     
-    def _analyze_video(self, state: AgentState) -> AgentState:
+    def analyze_video(self, state: AgentState) -> AgentState:
         user_query = state.get("user_query", "")
         conversation_context = state.get("conversation_context", {})
         
@@ -576,13 +572,13 @@ Video ID:"""
         
         return state
     
-    def _route_after_classify(self, state: AgentState) -> str:
+    def route_after_classify(self, state: AgentState) -> str:
         intent = state.get("intent", "chat")
         if intent not in ["chat", "find_videos", "index", "analyze"]:
             intent = "chat"
         return intent
     
-    def _respond(self, state: AgentState) -> AgentState:
+    def respond(self, state: AgentState) -> AgentState:
         intent = state.get("intent", "")
         user_query = state.get("user_query", "")
         messages = state.get("messages", [])

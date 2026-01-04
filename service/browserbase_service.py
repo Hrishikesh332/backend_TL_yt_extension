@@ -21,7 +21,7 @@ class BrowserbaseService:
         
         self.bb = Browserbase(api_key=self.browserbase_api_key)
         
-    def _extract_video_id(self, url: str) -> Optional[str]:
+    def extract_video_id(self, url: str) -> Optional[str]:
         if not url:
             return None
         patterns = [
@@ -34,7 +34,7 @@ class BrowserbaseService:
                 return match.group(1)
         return None
 
-    def _extract_title(self, video_el: ElementHandle, link_el: ElementHandle = None, aria_label: str = None) -> str:
+    def extract_title(self, video_el: ElementHandle, link_el: ElementHandle = None, aria_label: str = None) -> str:
         title = None
         
         if aria_label:
@@ -66,7 +66,7 @@ class BrowserbaseService:
         
         return title
 
-    def _extract_duration(self, video_el: ElementHandle, aria_label: str = None) -> Optional[str]:
+    def extract_duration(self, video_el: ElementHandle, aria_label: str = None) -> Optional[str]:
         duration = None
         
         if aria_label and '·' in aria_label:
@@ -128,7 +128,7 @@ class BrowserbaseService:
         
         return duration
 
-    def _extract_thumbnail_url(self, video_el: ElementHandle, video_id: str) -> str:
+    def extract_thumbnail_url(self, video_el: ElementHandle, video_id: str) -> str:
         thumbnail_url = None
         
         try:
@@ -147,7 +147,7 @@ class BrowserbaseService:
         
         return thumbnail_url
 
-    def _find_title_link(self, video_el: ElementHandle) -> Optional[ElementHandle]:
+    def find_title_link(self, video_el: ElementHandle) -> Optional[ElementHandle]:
         all_links = video_el.query_selector_all('a[href*="/watch?v="]')
         
         for link in all_links:
@@ -162,33 +162,33 @@ class BrowserbaseService:
                 continue
             
             if aria_label and len(aria_label) > 15 and (' by ' in aria_label or ' · ' in aria_label):
-                video_id = self._extract_video_id(href)
+                video_id = self.extract_video_id(href)
                 if video_id:
                     return link
         
         direct_title_link = video_el.query_selector('a#video-title-link')
         if direct_title_link:
             href = direct_title_link.get_attribute('href')
-            if href and self._extract_video_id(href):
+            if href and self.extract_video_id(href):
                 return direct_title_link
         
         for link in all_links:
             link_text = link.inner_text().strip()
             if link_text not in ['Watch', 'watch'] and len(link_text) > 5:
                 href = link.get_attribute('href')
-                if href and self._extract_video_id(href):
+                if href and self.extract_video_id(href):
                     return link
         
         return None
 
-    def _extract_video_data_from_element(self, video_el: ElementHandle) -> Optional[Dict]:
+    def extract_video_data_from_element(self, video_el: ElementHandle) -> Optional[Dict]:
         try:
-            title_link = self._find_title_link(video_el)
+            title_link = self.find_title_link(video_el)
             if not title_link:
                 return None
             
             href = title_link.get_attribute('href')
-            video_id = self._extract_video_id(href)
+            video_id = self.extract_video_id(href)
             if not video_id:
                 return None
             
@@ -196,7 +196,7 @@ class BrowserbaseService:
             
             aria_label = title_link.get_attribute('aria-label') or ''
             
-            title = self._extract_title(video_el, title_link, aria_label)
+            title = self.extract_title(video_el, title_link, aria_label)
             if not title or len(title) < 3:
                 title = f"Video {video_id}"
             
@@ -207,8 +207,8 @@ class BrowserbaseService:
                 if len(channel_name) < 2:
                     channel_name = None
             
-            duration = self._extract_duration(video_el, aria_label)
-            thumbnail_url = self._extract_thumbnail_url(video_el, video_id)
+            duration = self.extract_duration(video_el, aria_label)
+            thumbnail_url = self.extract_thumbnail_url(video_el, video_id)
             
             return {
                 "title": title,
@@ -222,7 +222,7 @@ class BrowserbaseService:
             print(f"Error extracting video data: {e}")
             return None
 
-    def _extract_videos_from_page(self, page: Page, max_videos: int) -> List[Dict]:
+    def extract_videos_from_page(self, page: Page, max_videos: int) -> List[Dict]:
         videos = []
         seen_ids = set()
         
@@ -236,7 +236,7 @@ class BrowserbaseService:
             if ad_indicator:
                 continue
             
-            video_data = self._extract_video_data_from_element(video_el)
+            video_data = self.extract_video_data_from_element(video_el)
             if not video_data:
                 continue
             
@@ -257,7 +257,7 @@ class BrowserbaseService:
                 if ad_indicator:
                     continue
                 
-                video_data = self._extract_video_data_from_element(video_el)
+                video_data = self.extract_video_data_from_element(video_el)
                 if not video_data:
                     continue
                 
@@ -275,7 +275,7 @@ class BrowserbaseService:
                     break
                 
                 href = link.get_attribute('href')
-                video_id = self._extract_video_id(href)
+                video_id = self.extract_video_id(href)
                 if not video_id or video_id in seen_ids:
                     continue
                 seen_ids.add(video_id)
@@ -309,15 +309,15 @@ class BrowserbaseService:
         
         return videos
 
-    def _fetch_metadata_with_ytdlp(self, video: Dict) -> Dict:
-        video = self._fetch_metadata_via_oembed(video)
+    def fetch_metadata_with_ytdlp(self, video: Dict) -> Dict:
+        video = self.fetch_metadata_via_oembed(video)
         
         if (not video.get('title') or video['title'].startswith('Video ')) or not video.get('duration'):
-            video = self._fetch_metadata_via_ytdlp(video)
+            video = self.fetch_metadata_via_ytdlp(video)
         
         return video
     
-    def _fetch_metadata_via_oembed(self, video: Dict) -> Dict:
+    def fetch_metadata_via_oembed(self, video: Dict) -> Dict:
         try:
             import urllib.request
             import json
@@ -345,7 +345,7 @@ class BrowserbaseService:
         
         return video
     
-    def _fetch_metadata_via_ytdlp(self, video: Dict) -> Dict:
+    def fetch_metadata_via_ytdlp(self, video: Dict) -> Dict:
         try:
             import yt_dlp
             
@@ -484,7 +484,7 @@ class BrowserbaseService:
                     
                     send_status("info", "Extracting video information...")
 
-                    raw_videos = self._extract_videos_from_page(page, max_videos)
+                    raw_videos = self.extract_videos_from_page(page, max_videos)
                     send_status("info", f"Found {len(raw_videos)} raw videos")
 
                     filtered_videos = []
@@ -510,7 +510,7 @@ class BrowserbaseService:
 
                         if needs_metadata:
                             send_status("info", f"Fetching metadata for video {len(filtered_videos) + 1}...")
-                            video = self._fetch_metadata_with_ytdlp(video)
+                            video = self.fetch_metadata_with_ytdlp(video)
 
                         if not video.get('thumbnailUrl'):
                             video['thumbnailUrl'] = f"https://img.youtube.com/vi/{video.get('videoId', '')}/maxresdefault.jpg"
