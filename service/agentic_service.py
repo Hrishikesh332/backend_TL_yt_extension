@@ -393,7 +393,18 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
                             indexed_results.append({
                                 "video": video,
                                 "video_id": first_video_id,
+                                "video_ids": [first_video_id],
+                                "chunks": [
+                                    {
+                                        "chunk_number": 1,
+                                        "video_id": first_video_id,
+                                        "status": "indexed",
+                                        "time_range": "0:00:00-1:00:00"
+                                    }
+                                ],
                                 "segments": len(video_segments),
+                                "total_segments": len(video_segments),
+                                "indexed_segments": 1,
                                 "remaining_segments_processing": True,
                                 "status": "indexed"
                             })
@@ -486,7 +497,22 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
                 video_title = result["video"].get("title", "Unknown")
                 video_id = result["video_id"]
                 status = result["status"]
-                response_parts.append(f"  • {video_title}\n    Video ID: {video_id} ({status})")
+                
+                if result.get("chunks"):
+                    chunks_info = result["chunks"]
+                    total_segments = result.get("total_segments", 1)
+                    indexed_segments = result.get("indexed_segments", 1)
+                    
+                    if total_segments > 1:
+                        response_parts.append(f"  • {video_title}\n    Video ID: {video_id} ({status})")
+                        response_parts.append(f"    Chunks: {indexed_segments}/{total_segments} indexed")
+                        response_parts.append(f"    Chunk 1: {chunks_info[0]['video_id']} ({chunks_info[0]['time_range']})")
+                        if result.get("remaining_segments_processing"):
+                            response_parts.append(f"    ⏳ Remaining {total_segments - indexed_segments} chunk(s) processing in background")
+                    else:
+                        response_parts.append(f"  • {video_title}\n    Video ID: {video_id} ({status})")
+                else:
+                    response_parts.append(f"  • {video_title}\n    Video ID: {video_id} ({status})")
         
         if failed_results:
             response_parts.append(f"\n❌ Failed to index {len(failed_results)} video(s):")

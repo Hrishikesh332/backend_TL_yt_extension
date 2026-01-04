@@ -2,10 +2,15 @@ from flask import request, jsonify
 import os
 import uuid
 import threading
+from collections import defaultdict
 from . import api
 from utils.video_downloader import download_youtube_video
 from utils.video_processor import get_video_duration_from_file, clip_video
 from service.twelvelabs_service import TwelveLabsService
+
+# Store chunk video IDs for videos being processed
+chunk_video_ids = defaultdict(list)
+chunk_lock = threading.Lock()
 
 twelvelabs_service = None
 
@@ -102,6 +107,10 @@ def download_and_index():
                 
                 print(f"First segment indexed successfully: {first_video_id}")
                 
+                # Store first chunk ID
+                with chunk_lock:
+                    chunk_video_ids[youtube_url] = [first_video_id]
+                
                 # Clean up first segment file
                 if first_segment != downloaded_path and os.path.exists(first_segment):
                     try:
@@ -110,8 +119,9 @@ def download_and_index():
                         print(f"Warning: Could not delete first segment file: {e}")
                 
                 # Process remaining segments in background
-                def index_remaining_segments(segments, original_path):
+                def index_remaining_segments(segments, original_path, vid_url):
                     remaining_segments = segments[1:]
+                    
                     for segment_idx, segment_path in enumerate(remaining_segments, start=2):
                         try:
                             print(f"[BACKGROUND] Indexing segment {segment_idx}/{len(segments)}: {segment_path}")
@@ -120,7 +130,13 @@ def download_and_index():
                                 file_path=segment_path
                             )
                             if 'error' not in result and result.get("video_id"):
-                                print(f"[BACKGROUND] Segment {segment_idx} indexed: {result.get('video_id')}")
+                                segment_id = result.get("video_id")
+                                print(f"[BACKGROUND] Segment {segment_idx} indexed: {segment_id}")
+                                
+                                # Update stored chunk IDs
+                                with chunk_lock:
+                                    if vid_url in chunk_video_ids:
+                                        chunk_video_ids[vid_url].append(segment_id)
                         except Exception as e:
                             print(f"[BACKGROUND] Error indexing segment {segment_idx}: {str(e)}")
                         finally:
@@ -137,10 +153,12 @@ def download_and_index():
                             print(f"[BACKGROUND] Original file deleted: {original_path}")
                         except:
                             pass
+                    
+                    print(f"[BACKGROUND] All segments indexed for {vid_url}. Total chunks: {len(chunk_video_ids.get(vid_url, []))}")
                 
                 thread = threading.Thread(
                     target=index_remaining_segments,
-                    args=(video_segments, downloaded_path),
+                    args=(video_segments, downloaded_path, youtube_url),
                     daemon=True
                 )
                 thread.start()
@@ -148,9 +166,20 @@ def download_and_index():
                 return jsonify({
                     "status": "success",
                     "video_id": first_video_id,
+                    "video_ids": [first_video_id],
+                    "chunks": [
+                        {
+                            "chunk_number": 1,
+                            "video_id": first_video_id,
+                            "status": "indexed",
+                            "time_range": "0:00:00-1:00:00"
+                        }
+                    ],
                     "segments": len(video_segments),
+                    "total_segments": len(video_segments),
+                    "indexed_segments": 1,
                     "remaining_segments_processing": True,
-                    "message": f"First segment indexed and ready for analysis. {len(video_segments)-1} remaining segment(s) processing in background."
+                    "message": f"First chunk (1/{len(video_segments)}) indexed and ready for analysis. {len(video_segments)-1} remaining chunk(s) processing in background. Use /api/get-video-chunks?video_url={youtube_url} to get all chunk IDs."
                 }), 200
             else:
                 # Only one segment (shouldn't happen if duration > 3600, but handle it)
