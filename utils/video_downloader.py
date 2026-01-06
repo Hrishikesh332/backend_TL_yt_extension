@@ -87,10 +87,10 @@ def download_youtube_video(url, output_path):
     
     # Proxy was working before - use it first with the client strategies that worked
     if proxy_url:
-        # Use the exact client order that worked before: ['web'], ['mweb'], ['android'], ['ios']
-        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (web client)', 'client_order': ['web']})
-        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (mweb client)', 'client_order': ['mweb']})
+        # Reordered: android first (was 3rd), then mweb, then web (was 1st), then ios
         strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (android client)', 'client_order': ['android']})
+        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (mweb client)', 'client_order': ['mweb']})
+        strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (web client)', 'client_order': ['web']})
         strategies.append({'use_cookies': False, 'use_proxy': True, 'fake_ip': False, 'name': 'Proxy only (ios client)', 'client_order': ['ios']})
     
     # Then try cookies combinations

@@ -2,6 +2,7 @@ from flask import request, jsonify
 import os
 import uuid
 import threading
+import traceback
 from collections import defaultdict
 from . import api
 from utils.video_downloader import download_youtube_video
@@ -224,12 +225,17 @@ def download_and_index():
                 }), 200
         else:
             # Video is 1 hour or less - process normally (no changes)
-            print(f"Video is {duration/60:.2f if duration else 'unknown'} minutes, processing normally")
+            duration_minutes = f"{duration/60:.2f}" if duration else "unknown"
+            print(f"Video is {duration_minutes} minutes, processing normally")
             print(f"Indexing video in TwelveLabs with index_id: {index_id}")
             result = service.upload_video_file(
                 index_id=index_id,
                 file_path=downloaded_path
             )
+            
+            print(f"[DEBUG] Upload result type: {type(result)}")
+            print(f"[DEBUG] Upload result: {result}")
+            print(f"[DEBUG] Result keys: {result.keys() if isinstance(result, dict) else 'Not a dict'}")
             
             if 'error' in result:
                 print(f"ERROR: TwelveLabs upload failed: {result.get('error')}")
@@ -242,13 +248,18 @@ def download_and_index():
                 return jsonify(result), 500
             
             video_id_from_indexing = result.get("video_id")
+            print(f"[DEBUG] Extracted video_id: {video_id_from_indexing}")
             if not video_id_from_indexing:
+                print(f"[DEBUG] No video_id in result. Full result: {result}")
                 try:
                     if os.path.exists(downloaded_path):
                         os.remove(downloaded_path)
                 except Exception as e:
                     print(f"Warning: Could not delete temp file after error: {e}")
-                return jsonify({"error": "Indexing completed but no video_id returned"}), 500
+                return jsonify({
+                    "error": "Indexing completed but no video_id returned",
+                    "result": result
+                }), 500
             
             try:
                 if os.path.exists(downloaded_path):
@@ -264,5 +275,11 @@ def download_and_index():
             }), 200
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_traceback = traceback.format_exc()
+        print(f"[ERROR] Exception in download_and_index: {str(e)}")
+        print(f"[ERROR] Traceback:\n{error_traceback}")
+        return jsonify({
+            "error": str(e),
+            "traceback": error_traceback
+        }), 500
 

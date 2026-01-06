@@ -264,7 +264,8 @@ def index_videos():
                         })
                 else:
                     # Video is 1 hour or less - process normally (no changes)
-                    print(f"Video is {duration/60:.2f if duration else 'unknown'} minutes, processing normally")
+                    duration_minutes = f"{duration/60:.2f}" if duration else "unknown"
+                    print(f"Video is {duration_minutes} minutes, processing normally")
                 result = service.upload_video_file(
                     index_id=index_id,
                     file_path=downloaded_path
@@ -557,7 +558,7 @@ def index_videos_stream():
                     update_queue.put({
                         "type": "status",
                         "status": "indexing",
-                        "message": f"Video is {duration/60:.2f if duration else 'unknown'} minutes, indexing normally"
+                        "message": f"Video is {f'{duration/60:.2f}' if duration else 'unknown'} minutes, indexing normally"
                     })
                     
                     result = service.upload_video_file(
