@@ -60,12 +60,19 @@ def download_and_index():
         video_path = os.path.join(temp_dir, f"yt_{yt_video_id}_{unique_id}.mp4")
         
         print(f"Downloading video from: {youtube_url}")
-        downloaded_path = download_youtube_video(youtube_url, video_path)
+        download_result = download_youtube_video(youtube_url, video_path, return_title=True)
+        if isinstance(download_result, tuple):
+            downloaded_path, video_title = download_result
+        else:
+            downloaded_path = download_result
+            video_title = None
         
         if not os.path.exists(downloaded_path):
             return jsonify({"error": "Video download failed"}), 500
         
         print(f"Video downloaded to: {downloaded_path}")
+        if video_title:
+            print(f"Video title: {video_title}")
         
         # Check video duration first
         duration = get_video_duration_from_file(downloaded_path)
@@ -84,7 +91,9 @@ def download_and_index():
                 print(f"Indexing first segment immediately: {first_segment}")
                 result = service.upload_video_file(
                     index_id=index_id,
-                    file_path=first_segment
+                    file_path=first_segment,
+                    video_title=video_title,
+                    youtube_url=youtube_url
                 )
                 
                 if 'error' in result:
@@ -186,7 +195,9 @@ def download_and_index():
                 # Only one segment (shouldn't happen if duration > 3600, but handle it)
                 result = service.upload_video_file(
                     index_id=index_id,
-                    file_path=video_segments[0]
+                    file_path=video_segments[0],
+                    video_title=video_title,
+                    youtube_url=youtube_url
                 )
                 
                 if 'error' in result:
@@ -230,7 +241,9 @@ def download_and_index():
             print(f"Indexing video in TwelveLabs with index_id: {index_id}")
             result = service.upload_video_file(
                 index_id=index_id,
-                file_path=downloaded_path
+                file_path=downloaded_path,
+                video_title=video_title,
+                youtube_url=youtube_url
             )
             
             print(f"[DEBUG] Upload result type: {type(result)}")

@@ -80,14 +80,28 @@ class AgenticService:
             }
         )
         
-        # After finding videos, always respond (show videos + ask about indexing)
+        # After finding videos, always respond (show videos + ask about analyzing)
         workflow.add_edge("find_videos", "respond")
         
-        # After indexing, respond
-        workflow.add_edge("index_videos", "respond")
+        # After analyze, check if videos need indexing first
+        workflow.add_conditional_edges(
+            "analyze_video",
+            self.route_after_analyze_check,
+            {
+                "index": "index_videos",
+                "respond": "respond"
+            }
+        )
         
-        # After analysis, respond
-        workflow.add_edge("analyze_video", "respond")
+        # After indexing, check if we need to analyze (if user originally wanted to analyze)
+        workflow.add_conditional_edges(
+            "index_videos",
+            self.route_after_index,
+            {
+                "analyze": "analyze_video",
+                "respond": "respond"
+            }
+        )
         
         # Respond is the end
         workflow.add_edge("respond", END)
@@ -125,7 +139,7 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
         context_info = ""
         if has_previous_videos:
             found_videos = conversation_context.get("found_videos", [])
-            context_info = f"\n\nCONVERSATION CONTEXT:\n- Previously found {len(found_videos)} video(s) that haven't been indexed yet\n- The user was likely asked if they want to index these videos\n- Consider if the current query is a confirmation/affirmative response to index those videos"
+            context_info = f"\n\nCONVERSATION CONTEXT:\n- Previously found {len(found_videos)} video(s)\n- The user was likely asked if they want to analyze these videos\n- Consider if the current query is a confirmation/affirmative response to analyze those videos (e.g., 'yes', 'sure', 'analyze them', 'go ahead')"
         
         messages = [
             SystemMessage(content=system_prompt),
@@ -137,6 +151,11 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
         
         if intent not in ["chat", "find_videos", "index", "analyze"]:
             intent = "chat"
+        
+        # If LLM classified as analyze and we have previous videos, populate them for analysis
+        if intent == "analyze" and has_previous_videos:
+            state["found_videos"] = conversation_context.get("found_videos", [])
+            state["selected_videos"] = conversation_context.get("found_videos", [])
         
         # If LLM classified as index and we have previous videos, populate them
         if intent == "index" and has_previous_videos:
@@ -206,7 +225,7 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
             
             state["found_videos"] = videos
             
-            # Format videos nicely and ASK about indexing
+            # Format videos nicely and ASK about analyzing
             if videos:
                 video_list = "\n".join([
                     f"{i+1}. **{v.get('title', 'Unknown')}**\n   URL: {v.get('url', 'N/A')}"
@@ -215,11 +234,11 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
                     for i, v in enumerate(videos)
                 ])
                 
-                # Show videos AND ask about indexing
+                # Show videos AND ask about analyzing (will intelligently handle indexing if needed)
                 state["messages"].append(AIMessage(
                     content=f"I found {len(videos)} video(s) for your search:\n\n{video_list}\n\n"
-                           f"**Would you like me to index these videos so you can analyze them later?**\n"
-                           f"Reply 'yes' or 'index them' to proceed with indexing."
+                           f"**Would you like to analyze these videos?**\n"
+                           f"Reply 'yes', 'analyze them', or 'sure' to proceed. I'll automatically index them first if needed, then analyze them."
                 ))
             else:
                 state["messages"].append(AIMessage(
@@ -312,7 +331,14 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
                         pass
                 
                 from utils.video_downloader import download_youtube_video
-                downloaded_path = download_youtube_video(video_url, video_path)
+                download_result = download_youtube_video(video_url, video_path, return_title=True)
+                if isinstance(download_result, tuple):
+                    downloaded_path, downloaded_title = download_result
+                    # Use downloaded title if we don't have one
+                    if not video_title and downloaded_title:
+                        video_title = downloaded_title
+                else:
+                    downloaded_path = download_result
                 
                 # Check video duration first
                 duration = get_video_duration_from_file(downloaded_path)
@@ -457,7 +483,9 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
                     
                     result = self.twelvelabs_service.upload_video_file(
                         index_id=self.index_id,
-                        file_path=downloaded_path
+                        file_path=downloaded_path,
+                        video_title=video_title,
+                        youtube_url=video_url
                     )
                     
                     # Clean up
@@ -523,13 +551,53 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
         state["messages"].append(AIMessage(content="\n".join(response_parts)))
         state["selected_videos"] = selected_videos
         
+        # Store indexed video IDs for potential analysis
+        if indexed_results:
+            indexed_video_ids = [r.get("video_id") for r in indexed_results if r.get("video_id")]
+            state["indexed_videos"] = indexed_results
+            # Store first video_id in conversation context for analysis
+            if indexed_video_ids and not state.get("conversation_context", {}).get("video_id"):
+                if "conversation_context" not in state:
+                    state["conversation_context"] = {}
+                state["conversation_context"]["video_id"] = indexed_video_ids[0]
+        
         return state
     
     def analyze_video(self, state: AgentState) -> AgentState:
         user_query = state.get("user_query", "")
         conversation_context = state.get("conversation_context", {})
+        found_videos = state.get("found_videos", [])
+        selected_videos = state.get("selected_videos", [])
         
+        # If we have videos that were just indexed, use their video IDs
         video_id = conversation_context.get("video_id")
+        
+        # Check if videos were just indexed and we have video IDs
+        if not video_id and selected_videos:
+            # Try to get video IDs from indexed videos
+            indexed_videos = state.get("indexed_videos", [])
+            if indexed_videos and len(indexed_videos) > 0:
+                # Use the first indexed video's ID
+                video_id = indexed_videos[0].get("video_id")
+        
+        # If still no video_id, try to find from found_videos by checking if they're already indexed
+        if not video_id and found_videos:
+            # Check if any of the found videos are already indexed
+            for video in found_videos:
+                video_url = video.get("url", "")
+                if video_url:
+                    existing_id = self.twelvelabs_service.find_video_by_url(self.index_id, video_url)
+                    if existing_id:
+                        video_id = existing_id
+                        break
+        
+        # If we have found_videos but no video_id, they need to be indexed first
+        # This will be handled by route_after_analyze_check
+        if not video_id and found_videos:
+            state["messages"].append(AIMessage(
+                content="Videos need to be indexed before analysis. Indexing them now..."
+            ))
+            return state
         
         if not video_id:
             extract_prompt = f"""Extract the video ID from this query: "{user_query}"
@@ -566,7 +634,16 @@ Video ID:"""
             result = self.twelvelabs_service.analyze_video(video_id, analysis_prompt)
             state["analysis_result"] = result
             state["video_id"] = video_id
-            state["messages"].append(AIMessage(content=f"Analysis result:\n{result}"))
+            
+            # Create a more conversational response
+            found_videos = state.get("found_videos", [])
+            if found_videos and len(found_videos) > 0:
+                video_title = found_videos[0].get("title", "the video")
+                response_message = f"✅ I've analyzed **{video_title}** for you:\n\n{result}"
+            else:
+                response_message = f"✅ Analysis complete:\n\n{result}"
+            
+            state["messages"].append(AIMessage(content=response_message))
         except Exception as e:
             state["messages"].append(AIMessage(content=f"Error analyzing video: {str(e)}"))
         
@@ -577,6 +654,42 @@ Video ID:"""
         if intent not in ["chat", "find_videos", "index", "analyze"]:
             intent = "chat"
         return intent
+    
+    def route_after_index(self, state: AgentState) -> str:
+        """After indexing, check if user originally wanted to analyze."""
+        # If the original intent was analyze, continue to analyze
+        original_intent = state.get("intent", "")
+        if original_intent == "analyze":
+            # Check if videos were successfully indexed
+            selected_videos = state.get("selected_videos", [])
+            if selected_videos:
+                return "analyze"
+        return "respond"
+    
+    def route_after_analyze_check(self, state: AgentState) -> str:
+        """After analyze attempt, check if videos need indexing first."""
+        found_videos = state.get("found_videos", [])
+        conversation_context = state.get("conversation_context", {})
+        video_id = conversation_context.get("video_id")
+        
+        # If we have found videos but no video_id, they need to be indexed first
+        if found_videos and not video_id:
+            # Check if any videos are already indexed
+            all_indexed = True
+            for video in found_videos:
+                video_url = video.get("url", "")
+                if video_url:
+                    existing_id = self.twelvelabs_service.find_video_by_url(self.index_id, video_url)
+                    if not existing_id:
+                        all_indexed = False
+                        break
+            
+            if not all_indexed:
+                # Need to index first
+                state["selected_videos"] = found_videos
+                return "index"
+        
+        return "respond"
     
     def respond(self, state: AgentState) -> AgentState:
         intent = state.get("intent", "")

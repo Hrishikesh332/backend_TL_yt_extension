@@ -5,7 +5,7 @@ import shutil
 import tempfile
 
 
-def download_youtube_video(url, output_path):
+def download_youtube_video(url, output_path, return_title=False):
     proxy_url = os.environ.get('PROXY_URL')
     
     # Get cookies file path - check multiple locations
@@ -236,12 +236,16 @@ def download_youtube_video(url, output_path):
                                 full_path = os.path.join(output_dir, filename)
                                 if os.path.isfile(full_path) and not filename.endswith('.part'):
                                     print(f"[DOWNLOAD] Success! File saved to: {full_path}")
+                                    if return_title:
+                                        return full_path, video_title
                                     return full_path
                     
                     base_name = os.path.splitext(output_path)[0]
                     for ext in ['.mkv', '.mp4', '.webm', '.m4a']:
                         if os.path.exists(base_name + ext):
                             print(f"[DOWNLOAD] Success! File saved to: {base_name + ext}")
+                            if return_title:
+                                return base_name + ext, video_title
                             return base_name + ext
                     
                     raise Exception(f"Downloaded file not found. Expected: {output_path}")

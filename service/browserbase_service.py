@@ -411,6 +411,97 @@ class BrowserbaseService:
 
         return video
     
+    def parse_query_filters(self, search_query: str) -> Dict:
+        """Parse search query to extract YouTube filter parameters."""
+        filters = {
+            "duration": None,
+            "upload_date": None,
+            "query_text": search_query
+        }
+        
+        query_lower = search_query.lower()
+        
+        if any(term in query_lower for term in ["short", "under 4", "less than 4", "< 4"]):
+            filters["duration"] = "short"
+        elif any(term in query_lower for term in ["medium", "4-20", "4 to 20", "between 4 and 20"]):
+            filters["duration"] = "medium"
+        elif any(term in query_lower for term in ["long", "over 20", "more than 20", "> 20"]):
+            filters["duration"] = "long"
+        
+        duration_patterns = [
+            r'(\d+)\s*(?:min|mins|minute|minutes|m)\s*(?:video|vid|clip)?',
+            r'(\d+)\s*(?:second|seconds|sec|secs|s)\s*(?:video|vid|clip)?',
+            r'video\s*(?:of|about|on)?\s*(\d+)\s*(?:min|mins|minute|minutes|m)',
+            r'in\s*(\d+)\s*(?:min|mins|minute|minutes|m)',
+        ]
+        
+        for pattern in duration_patterns:
+            match = re.search(pattern, query_lower)
+            if match:
+                minutes = int(match.group(1))
+                if minutes <= 4:
+                    filters["duration"] = "short"
+                elif minutes <= 20:
+                    filters["duration"] = "medium"
+                else:
+                    filters["duration"] = "long"
+                filters["query_text"] = re.sub(pattern, '', filters["query_text"], flags=re.IGNORECASE).strip()
+                break
+        
+        if any(term in query_lower for term in ["today", "recent", "latest", "new"]):
+            filters["upload_date"] = "today"
+        elif any(term in query_lower for term in ["this week", "past week", "last week"]):
+            filters["upload_date"] = "week"
+        elif any(term in query_lower for term in ["this month", "past month", "last month"]):
+            filters["upload_date"] = "month"
+        elif any(term in query_lower for term in ["this year", "past year", "last year"]):
+            filters["upload_date"] = "year"
+        
+        query_clean = filters["query_text"]
+        filter_words = ["short", "medium", "long", "today", "recent", "latest", "new", 
+                       "this week", "past week", "last week", "this month", "past month", 
+                       "last month", "this year", "past year", "last year", "video", "videos"]
+        for word in filter_words:
+            query_clean = re.sub(rf'\b{word}\b', '', query_clean, flags=re.IGNORECASE)
+        filters["query_text"] = ' '.join(query_clean.split()).strip()
+        
+        return filters
+    
+    def build_youtube_search_url(self, query_text: str, filters: Dict) -> str:
+        """Build YouTube search URL with filters."""
+        import urllib.parse
+        
+        base_url = "https://www.youtube.com/results"
+        params = {
+            "search_query": query_text
+        }
+        
+        if filters.get("duration"):
+            duration_map = {
+                "short": "EgIYAQ%253D%253D",
+                "medium": "EgIYAw%253D%253D",
+                "long": "EgIYAg%253D%253D"
+            }
+            if filters["duration"] in duration_map:
+                params["sp"] = duration_map[filters["duration"]]
+        
+        if filters.get("upload_date"):
+            date_map = {
+                "hour": "EgQIARAB",
+                "today": "EgQIAhAB",
+                "week": "EgQIAxAB",
+                "month": "EgQIBBAB",
+                "year": "EgQIBRAB"
+            }
+            if filters["upload_date"] in date_map:
+                if "sp" in params:
+                    params["sp"] = params["sp"] + "%252C" + date_map[filters["upload_date"]]
+                else:
+                    params["sp"] = date_map[filters["upload_date"]]
+        
+        query_string = urllib.parse.urlencode(params)
+        return f"{base_url}?{query_string}"
+    
     def discover_youtube_videos(self, search_query: str, max_videos: int = 3, status_callback=None) -> List[Dict]:
         def send_status(status, message):
             if status_callback:
@@ -421,7 +512,26 @@ class BrowserbaseService:
         
         try:
             send_status("starting", "Starting browser automation to find YouTube videos...")
-            send_status("info", f"Search query: '{search_query}'")
+            
+            send_status("info", "Analyzing query to extract filters...")
+            filters = self.parse_query_filters(search_query)
+            clean_query = filters["query_text"] or search_query
+            
+            send_status("info", f"Search query: '{clean_query}'")
+            
+            filters_applied = []
+            if filters.get("duration"):
+                filters_applied.append(f"Duration: {filters['duration']}")
+                send_status("info", f"Duration filter detected: {filters['duration']}")
+            if filters.get("upload_date"):
+                filters_applied.append(f"Upload date: {filters['upload_date']}")
+                send_status("info", f"Upload date filter detected: {filters['upload_date']}")
+            
+            if filters_applied:
+                send_status("info", f"Applying YouTube filters: {', '.join(filters_applied)}")
+            else:
+                send_status("info", "No filters detected, using default search")
+            
             send_status("info", f"Max videos to find: {max_videos}")
             
             with sync_playwright() as playwright:
@@ -437,39 +547,61 @@ class BrowserbaseService:
                 
                 try:
                     send_status("info", "Navigating to YouTube...")
-                    page.goto("https://www.youtube.com", wait_until="domcontentloaded")
-                    page.wait_for_load_state("networkidle", timeout=10000)
-                    time.sleep(2)
                     
-                    send_status("info", f"Searching for: '{search_query}'")
-                    
-                    search_selectors = [
-                        'input#search',
-                        'input[name="search_query"]',
-                        'input[placeholder*="Search"]',
-                        'input[aria-label*="Search"]',
-                        '#search-input',
-                        'input[type="text"]'
-                    ]
-                    
-                    search_input = None
-                    for selector in search_selectors:
-                        try:
-                            search_input = page.query_selector(selector)
-                            if search_input:
-                                break
-                        except:
-                            continue
-                    
-                    if search_input:
-                        search_input.click()
-                        time.sleep(0.3)
-                        search_input.fill(search_query)
-                        time.sleep(0.3)
-                        search_input.press("Enter")
+                    search_url = self.build_youtube_search_url(clean_query, filters)
+                    if filters.get("duration") or filters.get("upload_date"):
+                        send_status("info", f"Navigating to filtered search results...")
                     else:
-                        encoded_query = search_query.replace(' ', '+')
-                        page.goto(f"https://www.youtube.com/results?search_query={encoded_query}", wait_until="domcontentloaded")
+                        send_status("info", f"Navigating to search results...")
+                    
+                    page.goto(search_url, wait_until="domcontentloaded")
+                    page.wait_for_load_state("networkidle", timeout=15000)
+                    time.sleep(3)
+                    
+                    if filters.get("duration") or filters.get("upload_date"):
+                        try:
+                            filter_button = page.query_selector('button[aria-label*="Filter"], button[aria-label*="filter"], ytd-search-filter-renderer')
+                            if filter_button:
+                                send_status("info", "Applying additional filters via YouTube UI...")
+                                filter_button.click()
+                                time.sleep(1)
+                                
+                                if filters.get("duration"):
+                                    duration_labels = {
+                                        "short": "Under 4 minutes",
+                                        "medium": "4 - 20 minutes",
+                                        "long": "Over 20 minutes"
+                                    }
+                                    duration_label = duration_labels.get(filters["duration"])
+                                    if duration_label:
+                                        send_status("info", f"Selecting duration filter: {duration_label}")
+                                        duration_option = page.query_selector(f'text="{duration_label}"')
+                                        if duration_option:
+                                            duration_option.click()
+                                            time.sleep(0.5)
+                                            send_status("info", f"✓ Duration filter applied: {duration_label}")
+                                
+                                if filters.get("upload_date"):
+                                    date_labels = {
+                                        "today": "Today",
+                                        "week": "This week",
+                                        "month": "This month",
+                                        "year": "This year"
+                                    }
+                                    date_label = date_labels.get(filters["upload_date"])
+                                    if date_label:
+                                        send_status("info", f"Selecting upload date filter: {date_label}")
+                                        date_option = page.query_selector(f'text="{date_label}"')
+                                        if date_option:
+                                            date_option.click()
+                                            time.sleep(0.5)
+                                            send_status("info", f"✓ Upload date filter applied: {date_label}")
+                                
+                                send_status("info", "Filters applied successfully")
+                        except Exception as e:
+                            send_status("info", f"Note: Could not apply filters via UI, using URL-based filters: {e}")
+                    else:
+                        send_status("info", "No filters to apply, using standard search")
                     
                     send_status("info", "Waiting for search results...")
                     page.wait_for_load_state("networkidle", timeout=15000)

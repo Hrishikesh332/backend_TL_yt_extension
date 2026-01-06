@@ -2,6 +2,7 @@ from twelvelabs import TwelveLabs
 import requests
 import sys
 import os
+import uuid
 
 class TwelveLabsService:
     
@@ -52,20 +53,31 @@ class TwelveLabsService:
                 thumbnail_url = thumbnail_urls[0] if thumbnail_urls else None
                 video_url = hls_data.get('video_url') if hls_data else None
                 
-                # Extract YouTube URL from filename
+                # Extract YouTube URL and video title from filename
                 filename = system_metadata.filename if system_metadata and system_metadata.filename else f'Video {video.id}'
                 youtube_url = None
+                video_title_from_filename = None
                 
-                # Try to extract YouTube video ID from filename (format: yt_{video_id}_{unique_id}.mp4)
+                # Try to extract YouTube video ID and title from filename
+                # Format: yt_{video_id}_{title}_{unique_id}.mp4 or yt_{video_id}_{unique_id}.mp4
                 import re
-                yt_match = re.search(r'yt_([0-9A-Za-z_-]{11})', filename)
-                if yt_match:
-                    yt_video_id = yt_match.group(1)
+                # New format with title: yt_{video_id}_{title}_{unique_id}.mp4
+                yt_title_match = re.search(r'yt_([0-9A-Za-z_-]{11})_(.+?)_([a-f0-9]{8})\.', filename)
+                if yt_title_match:
+                    yt_video_id = yt_title_match.group(1)
+                    video_title_from_filename = yt_title_match.group(2)
                     youtube_url = f"https://www.youtube.com/watch?v={yt_video_id}"
+                else:
+                    # Old format without title: yt_{video_id}_{unique_id}.mp4
+                    yt_match = re.search(r'yt_([0-9A-Za-z_-]{11})', filename)
+                    if yt_match:
+                        yt_video_id = yt_match.group(1)
+                        youtube_url = f"https://www.youtube.com/watch?v={yt_video_id}"
                 
                 result.append({
                     "id": video.id,
                     "name": filename,
+                    "title": video_title_from_filename if video_title_from_filename else (filename if filename != f'Video {video.id}' else None),
                     "duration": system_metadata.duration if system_metadata else 0,
                     "thumbnail_url": thumbnail_url,
                     "video_url": video_url,
@@ -199,7 +211,7 @@ class TwelveLabsService:
             print(f"[DEBUG] Exception getting thumbnail: {str(e)}", file=sys.stderr)
             return None
 
-    def upload_video_file(self, index_id: str, file_path: str, timeout_seconds: int = 900):
+    def upload_video_file(self, index_id: str, file_path: str, video_title: str = None, youtube_url: str = None, timeout_seconds: int = 900):
 
         import sys
         try:
@@ -217,10 +229,47 @@ class TwelveLabsService:
                 "x-api-key": self.api_key
             }
 
+            # Create filename with video title and YouTube URL info
+            original_filename = os.path.basename(file_path)
+            upload_filename = original_filename
+            
+            # Extract YouTube video ID from original filename or youtube_url
+            yt_video_id = None
+            if youtube_url:
+                import re
+                video_id_match = re.search(r'(?:v=|/)([0-9A-Za-z_-]{11}).*', youtube_url)
+                if video_id_match:
+                    yt_video_id = video_id_match.group(1)
+            else:
+                # Try to extract from filename
+                import re
+                yt_match = re.search(r'yt_([0-9A-Za-z_-]{11})', original_filename)
+                if yt_match:
+                    yt_video_id = yt_match.group(1)
+            
+            # Build new filename with title
+            if video_title and yt_video_id:
+                # Sanitize title for filename (remove invalid chars, limit length)
+                import re
+                safe_title = re.sub(r'[<>:"/\\|?*]', '', video_title)
+                safe_title = safe_title[:100]  # Limit length
+                safe_title = safe_title.strip()
+                
+                # Get file extension
+                file_ext = os.path.splitext(original_filename)[1] or '.mp4'
+                
+                # Create new filename: yt_{video_id}_{safe_title}_{unique_id}.mp4
+                # Extract unique_id from original filename if present
+                unique_id_match = re.search(r'yt_[0-9A-Za-z_-]{11}_([a-f0-9]{8})', original_filename)
+                unique_id = unique_id_match.group(1) if unique_id_match else uuid.uuid4().hex[:8]
+                
+                upload_filename = f"yt_{yt_video_id}_{safe_title}_{unique_id}{file_ext}"
+                print(f"[DEBUG] Using filename with title: {upload_filename}", file=sys.stderr)
+
             # Create upload task
             with open(file_path, "rb") as f:
                 files = {
-                    "video_file": (os.path.basename(file_path), f)
+                    "video_file": (upload_filename, f)
                 }
                 data = {
                     "index_id": index_id
