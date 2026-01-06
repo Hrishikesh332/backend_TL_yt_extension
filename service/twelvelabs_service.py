@@ -52,12 +52,24 @@ class TwelveLabsService:
                 thumbnail_url = thumbnail_urls[0] if thumbnail_urls else None
                 video_url = hls_data.get('video_url') if hls_data else None
                 
+                # Extract YouTube URL from filename
+                filename = system_metadata.filename if system_metadata and system_metadata.filename else f'Video {video.id}'
+                youtube_url = None
+                
+                # Try to extract YouTube video ID from filename (format: yt_{video_id}_{unique_id}.mp4)
+                import re
+                yt_match = re.search(r'yt_([0-9A-Za-z_-]{11})', filename)
+                if yt_match:
+                    yt_video_id = yt_match.group(1)
+                    youtube_url = f"https://www.youtube.com/watch?v={yt_video_id}"
+                
                 result.append({
                     "id": video.id,
-                    "name": system_metadata.filename if system_metadata and system_metadata.filename else f'Video {video.id}',
+                    "name": filename,
                     "duration": system_metadata.duration if system_metadata else 0,
                     "thumbnail_url": thumbnail_url,
                     "video_url": video_url,
+                    "youtube_url": youtube_url,
                     "width": system_metadata.width if system_metadata else 0,
                     "height": system_metadata.height if system_metadata else 0,
                     "fps": system_metadata.fps if system_metadata else 0,

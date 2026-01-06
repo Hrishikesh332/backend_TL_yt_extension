@@ -273,7 +273,86 @@ curl -X POST "http://localhost:5000/api/agentic-chat/stream" \
 
 ---
 
-### 4. Download and Index Video
+### 4. List Videos
+
+**Endpoint:** `GET /api/list-videos`
+
+**Description:** Lists all videos in the TwelveLabs index with pagination support.
+
+**Query Parameters:**
+- `index_id` (optional) - TwelveLabs index ID (uses `TWELVELABS_INDEX_ID` from env if not provided)
+- `page` (optional, default: 1) - Page number
+- `limit` (optional, default: 5, max: 1000) - Number of videos per page
+- `all` (optional, default: false) - If `true`, fetches all videos across all pages
+
+**Example Requests:**
+```bash
+# Get first 5 videos
+GET /api/list-videos
+
+# Get next 5 videos (page 2)
+GET /api/list-videos?page=2
+
+# Get 10 videos per page
+GET /api/list-videos?limit=10&page=1
+
+# Get all videos
+GET /api/list-videos?all=true
+```
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "videos": [
+    {
+      "id": "695c67d7db0246c06ce52ed2",
+      "name": "yt_vE7Cy5csYbQ_5bf08839.mp4",
+      "duration": 118.42,
+      "thumbnail_url": "https://...",
+      "video_url": "https://...",
+      "youtube_url": "https://www.youtube.com/watch?v=vE7Cy5csYbQ",
+      "width": 640,
+      "height": 360,
+      "fps": 30,
+      "size": 6602791
+    }
+  ],
+  "total": 5,
+  "page": 1,
+  "limit": 5,
+  "has_more": true,
+  "pages": 2,
+  "index_id": "692b0bf08cb0fb5501fc1e6b",
+  "fetched_all": false
+}
+```
+
+**Response Fields:**
+- `videos` - Array of video objects
+  - `id` - TwelveLabs video ID
+  - `name` - Video filename
+  - `youtube_url` - Original YouTube URL (extracted from filename)
+  - `duration` - Video duration in seconds
+  - `thumbnail_url` - Video thumbnail URL
+  - `video_url` - HLS video stream URL
+  - `width`, `height`, `fps`, `size` - Video metadata
+- `total` - Number of videos in current page
+- `page` - Current page number
+- `limit` - Videos per page
+- `has_more` - Whether more pages are available
+- `pages` - Total pages (or "unknown" if not fetched)
+- `index_id` - Index ID used
+- `fetched_all` - Whether all videos were fetched
+
+**Notes**
+- Default pagination: 5 videos per page
+- YouTube URLs are automatically extracted from video filenames
+- Use `has_more` to determine if you should fetch the next page
+
+---
+
+### 5. Download and Index Video
 
 **Endpoint:** `POST /api/download-and-index`
 
@@ -303,7 +382,7 @@ curl -X POST "http://localhost:5000/api/agentic-chat/stream" \
 
 ---
 
-### 5. Analyze Video
+### 6. Analyze Video
 
 **Endpoint:** `POST /api/analyze`
 

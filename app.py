@@ -47,6 +47,7 @@ def home():
             "analyze": "/api/analyze (POST)",
             "find_videos": "/api/find-videos (POST)",
             "index_videos": "/api/index-videos (POST)",
+            "list_videos": "/api/list-videos (GET)",
             "agentic_chat": "/api/agentic-chat (POST)",
             "agentic_chat_stream": "/api/agentic-chat/stream (POST)"
         },
