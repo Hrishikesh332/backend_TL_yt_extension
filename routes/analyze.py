@@ -14,6 +14,23 @@ def get_twelvelabs_service():
     return twelvelabs_service
 
 
+def stream_analysis(service, video_id, prompt, analysis_type):
+    try:
+        yield json.dumps({
+            "status": "success",
+            "video_id": video_id,
+            "analysis_type": analysis_type,
+            "streaming": True
+        }) + "\n"
+        
+        for chunk in service.analyze_video_stream(video_id, prompt):
+            yield json.dumps({"chunk": chunk}) + "\n"
+        
+        yield json.dumps({"done": True}) + "\n"
+    except Exception as e:
+        yield json.dumps({"error": str(e)}) + "\n"
+
+
 @api.route('/analyze', methods=['POST'])
 def analyze():
     try:
@@ -45,23 +62,10 @@ def analyze():
             }
             prompt = prompt_map.get(analysis_type, 'Analyze this video')
         
-        def generate():
-            try:
-                yield json.dumps({
-                    "status": "success",
-                    "video_id": video_id,
-                    "analysis_type": analysis_type,
-                    "streaming": True
-                }) + "\n"
-                
-                for chunk in service.analyze_video_stream(video_id, prompt):
-                    yield json.dumps({"chunk": chunk}) + "\n"
-                
-                yield json.dumps({"done": True}) + "\n"
-            except Exception as e:
-                yield json.dumps({"error": str(e)}) + "\n"
-        
-        return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
+        return Response(
+            stream_with_context(stream_analysis(service, video_id, prompt, analysis_type)),
+            mimetype='application/x-ndjson'
+        )
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500

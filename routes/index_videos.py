@@ -699,5 +699,3 @@ def get_video_chunks():
     except Exception as e:
         print(f"Error getting video chunks: {str(e)}")
         return jsonify({"error": str(e)}), 500
-
-

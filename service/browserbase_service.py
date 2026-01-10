@@ -226,86 +226,44 @@ class BrowserbaseService:
         videos = []
         seen_ids = set()
         
-        video_elements = page.query_selector_all('ytd-video-renderer')
+        links = page.query_selector_all('a[href*="/watch?v="]')
         
-        for video_el in video_elements:
+        for link in links:
             if len(videos) >= max_videos + 1:
                 break
             
-            ad_indicator = video_el.query_selector('[class*="ad"], [class*="promo"], [class*="sponsored"]')
-            if ad_indicator:
-                continue
-            
-            video_data = self.extract_video_data_from_element(video_el)
-            if not video_data:
-                continue
-            
-            video_id = video_data.get("videoId")
-            if video_id in seen_ids:
+            href = link.get_attribute('href')
+            video_id = self.extract_video_id(href)
+            if not video_id or video_id in seen_ids:
                 continue
             seen_ids.add(video_id)
             
-            videos.append(video_data)
-        
-        if not videos:
-            video_elements = page.query_selector_all('ytd-rich-item-renderer')
-            for video_el in video_elements:
-                if len(videos) >= max_videos + 1:
-                    break
-                
-                ad_indicator = video_el.query_selector('[class*="ad"], [class*="promo"], [class*="sponsored"]')
-                if ad_indicator:
-                    continue
-                
-                video_data = self.extract_video_data_from_element(video_el)
-                if not video_data:
-                    continue
-                
-                video_id = video_data.get("videoId")
-                if video_id in seen_ids:
-                    continue
-                seen_ids.add(video_id)
-                
-                videos.append(video_data)
-        
-        if not videos:
-            links = page.query_selector_all('a[href*="/watch?v="]')
-            for link in links:
-                if len(videos) >= max_videos + 1:
-                    break
-                
-                href = link.get_attribute('href')
-                video_id = self.extract_video_id(href)
-                if not video_id or video_id in seen_ids:
-                    continue
-                seen_ids.add(video_id)
-                
-                title = link.get_attribute('aria-label') or link.get_attribute('title') or ''
-                if title:
-                    parts = re.split(r' by | · | - ', title)
-                    if parts:
-                        title = parts[0].strip()
-                
-                if not title or len(title) < 3:
-                    link_text = link.inner_text().strip()
-                    if link_text and link_text not in ['Watch', 'watch', 'Now playing', 'now playing'] and not re.match(r'^\d+:\d+', link_text) and len(link_text) > 3:
-                        title = link_text
-                
-                if title:
-                    title = re.sub(r'\s*[-–]\s*\d+:\d+.*$', '', title)
-                    title = re.sub(r'\s*\(\d+:\d+.*\)\s*$', '', title).strip()
-                
-                if not title or len(title) < 3:
-                    title = f"Video {video_id}"
-                
-                videos.append({
-                    "title": title,
-                    "url": f"https://www.youtube.com/watch?v={video_id}",
-                    "videoId": video_id,
-                    "channelName": None,
-                    "duration": None,
-                    "thumbnailUrl": f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-                })
+            title = link.get_attribute('aria-label') or link.get_attribute('title') or ''
+            if title:
+                parts = re.split(r' by | · | - ', title)
+                if parts:
+                    title = parts[0].strip()
+            
+            if not title or len(title) < 3:
+                link_text = link.inner_text().strip()
+                if link_text and link_text not in ['Watch', 'watch', 'Now playing', 'now playing'] and not re.match(r'^\d+:\d+', link_text) and len(link_text) > 3:
+                    title = link_text
+            
+            if title:
+                title = re.sub(r'\s*[-–]\s*\d+:\d+.*$', '', title)
+                title = re.sub(r'\s*\(\d+:\d+.*\)\s*$', '', title).strip()
+            
+            if not title or len(title) < 3:
+                title = f"Video {video_id}"
+            
+            videos.append({
+                "title": title,
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "videoId": video_id,
+                "channelName": None,
+                "duration": None,
+                "thumbnailUrl": f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+            })
         
         return videos
 
