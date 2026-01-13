@@ -1,7 +1,24 @@
+<div align="center">
+
 # TwelveLabs Assistant Extension 
 
 TwelveLabs powered browser extension for YouTube that provides video understanding, analysis, and chat capabilities
 
+</div>
+
+## 🚀 Features
+
+- **Automatic video indexing** through TwelveLabs with real-time video content analysis
+
+- **Browserbase integration** for browser automation capabilities for video discovery and information extraction
+
+- **Multiple analysis types** including semantic search, chapter segmentation, highlight extraction, summarization, and open-ended analysis on video content
+
+- **Configurable analysis_type parameters** for flexible video content processing
+
+- **Agentic chat interface** with intent node classification for dynamic video discovery, indexing, and analysis workflows
+
+- **Real time streaming responses** with status updates and progress indicators
 
 ## Quick Setup
 
