@@ -1,5 +1,31 @@
-# YouTube Extension - Flask API
+# TwelveLabs Assistant Extension 
 
+TwelveLabs powered browser extension for YouTube that provides video understanding, analysis, and chat capabilities
+
+
+## Quick Setup
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/Hrishikesh332/backend_TL_yt_extension.git
+cd backend_TL_yt_extension
+
+# 2. Install dependencies
+pip install -r requirements.txt
+playwright install chromium
+
+# 3. Configure environment variables
+cp .env.example .env
+# Edit .env with your API keys
+#   - OPENAI_API_KEY
+#   - TWELVELABS_API_KEY & TWELVELABS_INDEX_ID 
+#   - BROWSERBASE_API_KEY & BROWSERBASE_PROJECT_ID
+
+# 4. Run the server
+python app.py
+```
+
+---
 
 ## Base URL
 ```
