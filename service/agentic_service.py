@@ -57,7 +57,131 @@ class AgenticService:
         )
         
         self.graph = self.build_graph()
-    
+
+    def extract_search_parameters(self, user_query: str) -> Dict:
+
+        system_prompt = """You are a helpful assistant that extracts structured search parameters
+from a natural language user query about finding YouTube videos.
+
+You MUST respond with a single JSON object and nothing else.
+
+The JSON schema:
+{
+  "search_query": string,          // Clean search phrase to send to YouTube
+  "max_videos": integer or null,   // How many videos the user wants (null if not specified)
+  "duration_filter": string or null,      // One of: "short", "medium", "long", or null
+  "upload_date_filter": string or null    // One of: "today", "week", "month", "year", or null
+}
+
+Definitions:
+- "short"  = under ~4 minutes
+- "medium" = between ~4 and 20 minutes
+- "long"   = over ~20 minutes
+
+Important:
+- Infer max_videos when user mentions counts like "5 videos", "a couple of videos" etc.
+- Clean search_query by removing polite phrases like "please", "can you", "find me", "show me",
+  and count words like "5 videos", but KEEP the actual topic words.
+- If the user does not specify a number of videos, set max_videos to null.
+- If the user does not specify duration or recency, set the corresponding field to null.
+"""
+
+        examples = [
+            {
+                "user": "Please find 5 videos of the Ilya podcast under 1 hour discussing AGI",
+                "json": {
+                    "search_query": "Ilya podcast AGI",
+                    "max_videos": 5,
+                    "duration_filter": "long",
+                    "upload_date_filter": None
+                }
+            },
+            {
+                "user": "show me some short videos about transformers from this week",
+                "json": {
+                    "search_query": "transformers",
+                    "max_videos": None,
+                    "duration_filter": "short",
+                    "upload_date_filter": "week"
+                }
+            },
+            {
+                "user": "find podcasts where Demis Hassabis talks about deepmind",
+                "json": {
+                    "search_query": "Demis Hassabis DeepMind podcast",
+                    "max_videos": None,
+                    "duration_filter": None,
+                    "upload_date_filter": None
+                }
+            }
+        ]
+
+        example_block = "\n\n".join(
+            [
+                f'User query: "{ex["user"]}"\nExpected JSON: {json.dumps(ex["json"])}'
+                for ex in examples
+            ]
+        )
+
+        messages = [
+            SystemMessage(content=system_prompt + "\n\nExamples:\n" + example_block),
+            HumanMessage(content=f'User query: "{user_query}"\n\nReturn ONLY the JSON object.')
+        ]
+
+        try:
+            response = self.llm.invoke(messages)
+            content = response.content.strip()
+
+            # Extract JSON object from the response safely
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end >= start:
+                json_text = content[start : end + 1]
+            else:
+                json_text = "{}"
+
+            data = json.loads(json_text)
+
+            # Normalize and guard fields
+            search_query = data.get("search_query") or user_query
+            max_videos = data.get("max_videos")
+            try:
+                if isinstance(max_videos, str) and max_videos.isdigit():
+                    max_videos = int(max_videos)
+                if isinstance(max_videos, (int, float)):
+                    max_videos = int(max_videos)
+                else:
+                    max_videos = None
+            except Exception:
+                max_videos = None
+
+            duration_filter = data.get("duration_filter")
+            if duration_filter is not None:
+                duration_filter = str(duration_filter).lower()
+                if duration_filter not in ["short", "medium", "long"]:
+                    duration_filter = None
+
+            upload_date_filter = data.get("upload_date_filter")
+            if upload_date_filter is not None:
+                upload_date_filter = str(upload_date_filter).lower()
+                if upload_date_filter not in ["today", "week", "month", "year"]:
+                    upload_date_filter = None
+
+            return {
+                "search_query": search_query.strip(),
+                "max_videos": max_videos,
+                "duration_filter": duration_filter,
+                "upload_date_filter": upload_date_filter,
+            }
+        except Exception:
+            # Fallback: return basic defaults using raw query
+            return {
+                "search_query": user_query,
+                "max_videos": None,
+                "duration_filter": None,
+                "upload_date_filter": None,
+            }
+
     def build_graph(self) -> StateGraph:
         workflow = StateGraph(AgentState)
         
@@ -176,45 +300,15 @@ Respond with ONLY the intent name (one of: chat, find_videos, index, analyze).""
             return state
         
         try:
-            search_query = user_query
-            
-            import re
-            prefixes_to_remove = [
-                r'^find\s+videos?\s+(?:about|on|for|explaining)?\s*',
-                r'^search\s+for\s+videos?\s+(?:about|on|for)?\s*',
-                r'^show\s+me\s+videos?\s+(?:about|on|for)?\s*',
-                r'^get\s+videos?\s+(?:about|on|for)?\s*',
-                r'^videos?\s+(?:about|on|for|explaining)?\s*',
-                r'^find\s+',
-                r'^search\s+',
-            ]
-            
-            for pattern in prefixes_to_remove:
-                search_query = re.sub(pattern, '', search_query, flags=re.IGNORECASE)
-            
-            search_query = search_query.strip()
-            
-            if not search_query or len(search_query) < 2:
-                search_query = user_query
-            
-            max_videos = 3
-            number_patterns = [
-                r'(\d+)\s*videos?',
-                r'find\s+(\d+)',
-                r'show\s+me\s+(\d+)',
-                r'get\s+(\d+)',
-                r'(\d+)\s+results?'
-            ]
-            
-            for pattern in number_patterns:
-                match = re.search(pattern, user_query.lower())
-                if match:
-                    try:
-                        max_videos = int(match.group(1))
-                        max_videos = max(1, min(20, max_videos))
-                        break
-                    except ValueError:
-                        pass
+            # Use LLM to interpret the query and extract implicit parameters
+            params = self.extract_search_parameters(user_query)
+            search_query = params.get("search_query") or user_query
+
+            # Let the LLM decide how many videos, but clamp to a safe range
+            max_videos = params.get("max_videos")
+            if not isinstance(max_videos, int):
+                max_videos = 3
+            max_videos = max(1, min(20, max_videos))
             
             status_callback = getattr(self, '_current_status_callback', None)
             videos = self.browserbase_service.discover_youtube_videos(
